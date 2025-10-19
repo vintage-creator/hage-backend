@@ -352,8 +352,8 @@ describe("Shipments Complete E2E Tests", () => {
 				.field("weight", "1000")
 				.field("origin", JSON.stringify({ country: "Nigeria", state: "Lagos", address: "Test", phone: "+234" }))
 				.field("destination", JSON.stringify({ country: "UK", state: "London", address: "Test", phone: "+44" }))
-				.field("pickupMode", "WAREHOUSE_PICKUP")
-				.field("serviceType", "STANDARD")
+				.field("pickupMode", "PICKUP")
+				.field("serviceType", "AIR")
 				.field("baseFrieght", "1000")
 				.field("handlingFee", "200");
 

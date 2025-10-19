@@ -83,7 +83,7 @@ export class CreateShipmentDto {
 	// Pickup & Delivery
 	@IsEnum(PickupMode, { message: "Pickup mode must be either PICKUP or DROPOFF" })
 	@IsNotEmpty({ message: "Pickup mode is required" })
-	pickupMode!: PickupMode;
+	pickupMode!: string;
 
 	@IsOptional()
 	pickupDate?: string;
@@ -96,7 +96,7 @@ export class CreateShipmentDto {
 		message: "Service type must be one of: AIR, OCEAN, ROAD, or RAIL",
 	})
 	@IsNotEmpty({ message: "Service type is required" })
-	serviceType!: ServiceType;
+	serviceType!: string;
 
 	@IsNumber({}, { message: "Base freight must be a valid number" })
 	@Min(0, { message: "Base freight cannot be negative" })

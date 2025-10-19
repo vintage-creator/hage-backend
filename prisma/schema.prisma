@@ -331,7 +331,7 @@ model InventoryLocation {
 
 model Shipment {
   id      String @id @default(uuid())
-  orderId String @unique // e.g. ORD-2025-00001
+  orderId String @unique // e.g. SHP-2025-00001
 
   // CLIENT DETAILS
   clientName String

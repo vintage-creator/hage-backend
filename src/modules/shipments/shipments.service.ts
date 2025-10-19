@@ -26,17 +26,11 @@ export class ShipmentsService {
 	constructor(private readonly prisma: PrismaService, @Inject("StorageService") private readonly storage: StorageService, private readonly mailer: MailService, private readonly cfg: ConfigService) {}
 
 	// CREATE SHIPMENT (Step 1: Order Creation)
-	async create(dto: CreateShipmentDto, lspUserId: string, files?: Express.Multer.File[]): Promise<Shipment> {
+	async create(dto: any, lspUserId: string, files?: Express.Multer.File[]): Promise<Shipment> {
 		try {
-			// Validate required fields
-			this.validateShipmentData(dto);
-
 			// Upload documents concurrently
 			const uploadPromises = files?.map((file) => this.storage.uploadFile(file, { folder: "shipment-documents" })) ?? [];
 			const uploadedDocs = await Promise.all(uploadPromises);
-
-			// Calculate total cost
-			const totalCost = this.calculateTotalCost(dto.baseFrieght as any, dto.handlingFee as any, dto.insuranceFee as any);
 
 			const sanitizeNumber = (num?: any) => (isNaN(Number(num)) ? 0 : Number(num));
 
@@ -44,7 +38,7 @@ export class ShipmentsService {
 			const shipment = await this.prisma.$transaction(async (tx) => {
 				const createdShipment = await tx.shipment.create({
 					data: {
-						orderId: dto.orderId,
+						orderId: dto.orderId ?? this.generateOrderTrackingId(),
 						clientName: dto.clientName,
 						email: dto.email,
 						phone: dto.phone,
@@ -144,7 +138,11 @@ export class ShipmentsService {
 				where: { id: dto.transporterId },
 			});
 
-			if (!transporter || transporter.role !== "TRANSPORTER") {
+			if (!transporter) {
+				throw new NotFoundException("Transporter not found");
+			}
+
+			if (transporter.role !== "TRANSPORTER") {
 				throw new BadRequestException("Invalid transporter");
 			}
 		}
