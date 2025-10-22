@@ -1,6 +1,6 @@
 // src/modules/shipments/shipments.controller.ts
 import { Controller, Post, Body, Get, Param, Patch, Delete, UseGuards, UseInterceptors, UploadedFiles, Req, Query } from "@nestjs/common";
-import { ApiBearerAuth, ApiTags, ApiConsumes, ApiBody, ApiResponse, ApiQuery, ApiParam } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiTags, ApiConsumes, ApiBody, ApiResponse, ApiQuery, ApiParam, ApiOperation } from "@nestjs/swagger";
 import { FilesInterceptor } from "@nestjs/platform-express";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { ShipmentsService } from "./shipments.service";
@@ -157,6 +157,49 @@ export class ShipmentsController {
 	@ApiBearerAuth("access-token")
 	async getAllShipmentsAdmin(@Query() filters: FilterShipmentDto, @Req() req: any) {
 		return this.svc.findAllForLSP(req.user.id, filters);
+	}
+
+	@Get("analytics/dashboard")
+	@UseGuards(JwtAuthGuard)
+	@ApiBearerAuth("access-token")
+	@ApiOperation({ summary: "Get dashboard analytics and metrics" })
+	@ApiResponse({
+		status: 200,
+		description: "Dashboard analytics retrieved successfully",
+		schema: {
+			example: {
+				activeVehicles: 3,
+				shipmentsInTransit: 5,
+				completedDeliveries: 22,
+				delayedShipments: 8,
+				averageDeliveryTime: {
+					hours: 2,
+					minutes: 18,
+					totalMinutes: 138,
+				},
+				totalShipments: 38,
+				byStatus: {
+					pending: 2,
+					accepted: 1,
+					inTransit: 5,
+					completed: 22,
+					cancelled: 0,
+					delayed: 8,
+				},
+				recentActivity: [
+					{
+						shipmentId: "clx123",
+						orderId: "SHP-2025-12345",
+						status: "IN_TRANSIT",
+						updatedAt: "2025-10-21T10:30:00Z",
+					},
+				],
+			},
+		},
+	})
+	async getDashboardAnalytics(@Req() req: Request) {
+		const userId = (req.user as any).id;
+		return this.svc.getDashboardAnalytics(userId);
 	}
 
 	@Get(":id")

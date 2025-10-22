@@ -10,6 +10,7 @@ import type { Shipment } from "@prisma/client";
 import type { StorageService } from "../../common/storage/storage.interface";
 import { MailService } from "../../common/mail/mail.service";
 import { ConfigService } from "@nestjs/config";
+import { AnalyticsResponseDto } from "./dto/analytics-shipment.dto";
 
 enum DocumentType {
 	COMMERCIAL_INVOICE = "COMMERCIAL_INVOICE",
@@ -588,6 +589,148 @@ export class ShipmentsService {
 			pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
 			analytics,
 		};
+	}
+
+	async getDashboardAnalytics(userId: string): Promise<AnalyticsResponseDto> {
+		// Get user details to determine access level
+		const user = await this.prisma.user.findUnique({
+			where: { id: userId },
+			select: { id: true, kind: true, role: true },
+		});
+
+		if (!user) throw new ForbiddenException("User not found");
+
+		// Base where clause based on user role
+		const where: any = this.buildWhereClauseForUser(user);
+
+		// Get all shipments for this user
+		const shipments = await this.prisma.shipment.findMany({
+			where,
+			include: {
+				transporter: true,
+				statusHistory: {
+					orderBy: { timestamp: "desc" },
+				},
+			},
+		});
+
+		// Calculate metrics
+		const now = new Date();
+		const expectedDeliveryBuffer = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
+		// 1. Active Vehicles (unique transporters currently assigned)
+		const activeVehicles = new Set(
+			shipments.filter((s) => s.assignedTransporterId && ["ACCEPTED", "EN_ROUTE_TO_PICKUP", "PICKED_UP", "IN_TRANSIT"].includes(s.status)).map((s) => s.assignedTransporterId)
+		).size;
+
+		// 2. Shipments In Transit
+		const shipmentsInTransit = shipments.filter((s) => ["EN_ROUTE_TO_PICKUP", "PICKED_UP", "IN_TRANSIT", "ARRIVED_AT_DESTINATION"].includes(s.status)).length;
+
+		// 3. Completed Deliveries
+		const completedDeliveries = shipments.filter((s) => s.status === "COMPLETED").length;
+
+		// 4. Delayed Shipments (past expected delivery date)
+		const delayedShipments = shipments.filter((s) => {
+			if (s.status === "COMPLETED" || s.status === "CANCELLED") return false;
+			if (!s.deliveryDate) return false;
+			return new Date(s.deliveryDate).getTime() < now.getTime();
+		}).length;
+
+		// 5. Average Delivery Time (for completed shipments)
+		const completedShipmentsWithDates = shipments.filter((s) => s.status === "COMPLETED" && s.pickupDate && s.deliveryDate);
+
+		let averageDeliveryTimeMinutes = 0;
+		if (completedShipmentsWithDates.length > 0) {
+			const totalDeliveryTime = completedShipmentsWithDates.reduce((sum, shipment) => {
+				// Find actual pickup time from status history
+				const pickupHistory = shipment.statusHistory.find((h) => h.status === "PICKED_UP");
+				const completedHistory = shipment.statusHistory.find((h) => h.status === "COMPLETED");
+
+				if (pickupHistory && completedHistory) {
+					const pickupTime = new Date(pickupHistory.timestamp).getTime();
+					const completedTime = new Date(completedHistory.timestamp).getTime();
+					const deliveryTimeMs = completedTime - pickupTime;
+					return sum + deliveryTimeMs / (1000 * 60); // Convert to minutes
+				}
+				return sum;
+			}, 0);
+
+			averageDeliveryTimeMinutes = Math.round(totalDeliveryTime / completedShipmentsWithDates.length);
+		}
+
+		const hours = Math.floor(averageDeliveryTimeMinutes / 60);
+		const minutes = averageDeliveryTimeMinutes % 60;
+
+		// Status breakdown
+		const byStatus = {
+			pending: shipments.filter((s) => s.status === "PENDING_ACCEPTANCE").length,
+			accepted: shipments.filter((s) => s.status === "ACCEPTED").length,
+			inTransit: shipmentsInTransit,
+			completed: completedDeliveries,
+			cancelled: shipments.filter((s) => s.status === "CANCELLED").length,
+			delayed: delayedShipments,
+		};
+
+		// Recent activity (last 10 status updates)
+		const recentActivity = await this.prisma.shipmentStatusHistory.findMany({
+			where: {
+				shipment: where,
+			},
+			take: 10,
+			orderBy: { timestamp: "desc" },
+			include: {
+				shipment: {
+					select: {
+						id: true,
+						orderId: true,
+					},
+				},
+			},
+		});
+
+		return {
+			activeVehicles,
+			shipmentsInTransit,
+			completedDeliveries,
+			delayedShipments,
+			averageDeliveryTime: {
+				hours,
+				minutes,
+				totalMinutes: averageDeliveryTimeMinutes,
+			},
+			totalShipments: shipments.length,
+			byStatus,
+			recentActivity: recentActivity.map((activity) => ({
+				shipmentId: activity.shipment.id,
+				orderId: activity.shipment.orderId,
+				status: activity.status,
+				updatedAt: activity.timestamp,
+			})),
+		};
+	}
+
+	// Helper method to build where clause based on user role
+	private buildWhereClauseForUser(user: { id: string; kind: string; role: string | null }): any {
+		const where: any = {};
+
+		if (user.kind === "LOGISTIC_SERVICE_PROVIDER" || user.role === "CROSS_BORDER_LOGISTICS") {
+			// LSP can see all shipments - no filter needed
+			return where;
+		} else if (user.role === "TRANSPORTER" || user.role === "LAST_MILE_PROVIDER") {
+			// Transporters only see assigned shipments
+			where.assignedTransporterId = user.id;
+		} else if (user.kind === "ENTERPRISE" || user.kind === "DISTRIBUTOR") {
+			// Enterprises see shipments they created
+			where.createdBy = user.id;
+		} else if (user.kind === "END_USER") {
+			// End users see shipments where they are the customer
+			where.customerId = user.id;
+		} else {
+			// Unknown role - return impossible condition
+			where.id = "impossible-id";
+		}
+
+		return where;
 	}
 
 	// HELPER: Get access level description
