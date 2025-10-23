@@ -24,11 +24,11 @@ export class UrlService {
   }
 
   verificationUrl(token: string) {
-    return this.build("auth/verify-email", token);
+    return this.build("verify-email", token);
   }
 
   resetUrl(token: string) {
-    return this.build("auth/reset-password", token);
+    return this.build("reset-password", token);
   }
 }
 export default UrlService;

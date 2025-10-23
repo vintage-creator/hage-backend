@@ -11,7 +11,9 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, { cors: true });
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  app.setGlobalPrefix("api");
+  app.setGlobalPrefix("api", {
+    exclude: ['verify-email', 'reset-password'],
+  });  
 
   const config = new DocumentBuilder()
     .setTitle("Hage Logistics API")

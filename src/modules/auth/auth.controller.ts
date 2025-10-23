@@ -121,27 +121,6 @@ export class AuthController {
     });
   }
 
-  @Get("verify-email")
-  @ApiOperation({ summary: "Verify user email using token" })
-  @ApiResponse({
-    status: 200,
-    description: "Email verified — proceed to set password",
-  })
-  async verifyEmail(@Query("token") token: string) {
-    return this.auth.verifyEmail(token);
-  }
-
-  @Post("set-password")
-  @ApiOperation({ summary: "Set password after email verification" })
-  @ApiResponse({ status: 200, description: "Password set successfully" })
-  async setPassword(@Body() dto: CreatePasswordDto) {
-    return this.auth.setPassword(
-      dto.verificationToken,
-      dto.password,
-      dto.retypePassword
-    );
-  }
-
   @Post("login")
   @ApiOperation({ summary: "Login using email or phone and password" })
   @ApiResponse({ status: 200, description: "Returns access & refresh tokens" })

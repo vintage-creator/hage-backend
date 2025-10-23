@@ -239,25 +239,58 @@ export class AuthService {
       throw new BadRequestException("Passwords do not match");
     if (!isStrongPassword(password))
       throw new BadRequestException("Password is not strong enough");
-
-    const rec = await this.tokenService.findVerificationToken(
-      verificationToken
-    );
+  
+    const rec = await this.tokenService.findVerificationToken(verificationToken);
     if (!rec || rec.expiresAt < new Date())
       throw new BadRequestException("Invalid or expired token");
-
+  
     const hashed = await bcrypt.hash(password, 10);
-
-    await this.prisma.$transaction([
-      this.prisma.user.update({
+  
+    const user = await this.prisma.$transaction(async (tx) => {
+      const updatedUser = await tx.user.update({
         where: { id: rec.userId },
         data: { password: hashed, isVerified: true },
-      }),
-      this.prisma.verificationToken.delete({ where: { id: rec.id } }),
-    ]);
-
-    return { ok: true };
-  }
+      });
+  
+      await tx.verificationToken.delete({ where: { id: rec.id } });
+  
+      return updatedUser;
+    });
+  
+    // Prepare payload for access token
+    const payload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      kind: user.kind,
+    };
+    const accessToken = this.signAccessToken(payload);
+  
+    const rawRefresh = this.createRefreshTokenRaw();
+    const tokenHash = this.hashToken(rawRefresh);
+    const expiresAt = add(new Date(), { days: this.refreshDays });
+  
+    await this.prisma.refreshToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        userAgent: null,
+        expiresAt,
+      },
+    });
+  
+    return {
+      ok: true,
+      accessToken,
+      refreshToken: rawRefresh,
+      user: {
+        id: user.id,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+      },
+    };
+  }  
 
   private signAccessToken(payload: any) {
     const secret = this.cfg.get("JWT_SECRET");
@@ -443,17 +476,58 @@ export class AuthService {
       throw new BadRequestException("Passwords do not match");
     if (!isStrongPassword(password))
       throw new BadRequestException("Password is not strong enough");
-
+  
     const rec = await this.tokenService.findPasswordResetToken(token);
     if (!rec || rec.used || rec.expiresAt < new Date())
       throw new BadRequestException("Invalid or expired token");
-
+  
     const hashed = await bcrypt.hash(password, 10);
-    await this.prisma.user.update({
-      where: { id: rec.userId },
-      data: { password: hashed },
+  
+    const user = await this.prisma.$transaction(async (tx) => {
+      const updatedUser = await tx.user.update({
+        where: { id: rec.userId },
+        data: { password: hashed },
+      });
+  
+      await tx.passwordResetToken.update({
+        where: { id: rec.id },
+        data: { used: true },
+      });
+  
+      return updatedUser;
     });
-    await this.tokenService.markPasswordTokenUsed(rec.id);
-    return { ok: true };
+  
+    const payload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      kind: user.kind,
+    };
+    const accessToken = this.signAccessToken(payload);
+  
+    const rawRefresh = this.createRefreshTokenRaw();
+    const tokenHash = this.hashToken(rawRefresh);
+    const expiresAt = add(new Date(), { days: this.refreshDays });
+  
+    await this.prisma.refreshToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        userAgent: null,
+        expiresAt,
+      },
+    });
+  
+    return {
+      ok: true,
+      accessToken,
+      refreshToken: rawRefresh,
+      user: {
+        id: user.id,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+      },
+    };
   }
 }

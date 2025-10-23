@@ -8,9 +8,10 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { CloudinaryService } from '../../common/storage/cloudinary.service';
 import { MailService } from '../../common/mail/mail.service';
-import TokenService from "./token.service";
-import UrlService from "./url.service";
-
+import TokenService from './token.service';
+import UrlService from './url.service';
+import { VerifyController } from './verify.controller';
+import { ResetController } from './reset.controller';
 
 @Module({
   imports: [
@@ -26,14 +27,14 @@ import UrlService from "./url.service";
     }),
     PrismaModule,
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, VerifyController, ResetController],
   providers: [
-    AuthService, 
+    AuthService,
     JwtStrategy,
     MailService,
-    TokenService, 
+    TokenService,
     UrlService,
-    { provide: 'StorageService', useClass: CloudinaryService }, 
+    { provide: 'StorageService', useClass: CloudinaryService },
   ],
   exports: [AuthService, TokenService, UrlService],
 })
