@@ -4,7 +4,7 @@
       <mj-all font-family="Helvetica, Arial, sans-serif" />
       <mj-class
         name="btn"
-        background-color="#2563EB"
+        background-color="#22C55E"
         color="#ffffff"
         border-radius="6px"
         padding="12px 24px"
@@ -16,16 +16,16 @@
 
   <mj-body background-color="#F5F7FA">
     <!-- Logo Section -->
-    <mj-section padding="20px 24px 0 24px">
+    <mj-section padding="20px 24px 0 24px" text-align="center">
       <mj-column
         background-color="#050301"
         border-radius="10px"
         vertical-align="middle"
         padding="0"
-        align="center"
       >
         <mj-image
           width="80px"
+          align="center"
           src="{{logoUrl}}"
           alt="{{appName}}"
           padding="6px 8px"
