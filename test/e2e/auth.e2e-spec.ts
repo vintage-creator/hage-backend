@@ -43,7 +43,9 @@ describe("Auth (e2e) — register / verify / set-password / login", () => {
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true })
     );
-    app.setGlobalPrefix("api");
+    app.setGlobalPrefix("api", {
+      exclude: ['verify-email', 'reset-password'],
+    });    
 
     await app.init();
 
@@ -118,7 +120,7 @@ describe("Auth (e2e) — register / verify / set-password / login", () => {
 
     // 3) GET verify-email (validate token)
     const verifyRes = await request(app.getHttpServer())
-      .get(`/api/auth/verify-email?token=${encodeURIComponent(token)}`)
+      .get(`/verify-email?token=${encodeURIComponent(token)}`)
       .expect(200);
 
     expect(verifyRes.body).toEqual(

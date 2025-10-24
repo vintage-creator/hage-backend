@@ -121,6 +121,17 @@ export class AuthController {
     });
   }
 
+  @Post("set-password")
+  @ApiOperation({ summary: "Set password after email verification" })
+  @ApiResponse({ status: 200, description: "Password set successfully" })
+  async setPassword(@Body() dto: CreatePasswordDto) {
+    return this.auth.setPassword(
+      dto.verificationToken,
+      dto.password,
+      dto.retypePassword
+    );
+  }
+
   @Post("login")
   @ApiOperation({ summary: "Login using email or phone and password" })
   @ApiResponse({ status: 200, description: "Returns access & refresh tokens" })
@@ -143,7 +154,6 @@ export class AuthController {
     const user = (req as any).user;
     const userId = user?.sub ?? null;
 
-    // revoke tokens in a silent/idempotent way
     await this.auth.logout({
       userId,
       refreshToken: dto.refreshToken,
@@ -154,7 +164,7 @@ export class AuthController {
     res.clearCookie("refresh_token", {
       httpOnly: true,
       sameSite: "lax",
-      secure: isProd, // secure cookies only in production (HTTPS)
+      secure: isProd,
     });
 
     return;
@@ -172,20 +182,6 @@ export class AuthController {
   async forgotPassword(@Body() dto: ForgotPasswordRequestDto) {
     return this.auth.requestPasswordReset(dto.email);
   }
-
-  @Post("reset-password")
-  @ApiOperation({ summary: "Reset password using token from email" })
-  @ApiResponse({ status: 200, description: "Password reset successfully" })
-  async resetPassword(@Body() dto: ResetPasswordDto) {
-    return this.auth.resetPassword(dto.token, dto.password, dto.retypePassword);
-  }
-
-  @Get("reset-password")
-  @ApiOperation({
-    summary:
-      "Verify the password reset token and return token details if valid",
-  })
-  async verifyReset(@Query("token") token: string) {
-    return this.auth.verifyResetToken(token);
-  }
 }
+
+
