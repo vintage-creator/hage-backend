@@ -25,6 +25,10 @@ class LocationDto {
 	@IsString({ message: "Address must be a string" })
 	@IsNotEmpty({ message: "Address is required" })
 	address!: string;
+
+	@IsString({ message: "Phone number must be a string" })
+	@IsNotEmpty({ message: "Phone number is required" })
+	phone!: string;
 }
 
 export class CreateShipmentDto {

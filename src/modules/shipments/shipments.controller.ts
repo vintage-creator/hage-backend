@@ -44,11 +44,13 @@ export class ShipmentsController {
 						country: "Nigeria",
 						state: "Lagos",
 						address: "12 Marina Street",
+						phone: "+23481234576",
 					},
 					destination: {
 						country: "Ghana",
 						state: "Accra",
 						address: "45 High Street",
+						phone: "+23481234576",
 					},
 					pickupMode: "PICKUP",
 					pickupDate: "2025-10-20T09:00:00Z",
