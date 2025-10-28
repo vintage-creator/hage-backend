@@ -291,6 +291,10 @@ export class AuthService {
         phone: user.phone,
         role: user.role,
         name: user.company?.fullName ?? "User",
+        companyId: user.company?.id ?? null,
+        company: user.company
+          ? { id: user.company.id, businessName: user.company.businessName }
+          : null,
       },
     };
   }
@@ -354,6 +358,10 @@ export class AuthService {
         phone: user.phone,
         role: user.role,
         name: user.company?.fullName ?? null,
+        companyId: user.company?.id ?? null,
+        company: user.company
+          ? { id: user.company.id, businessName: user.company.businessName }
+          : null,
       },
     };
   }
@@ -392,21 +400,51 @@ export class AuthService {
         "If an account with that email exists, a reset email has been sent.",
     };
 
-    const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user) return genericResp;
+    if (!email) return genericResp;
+
+    const normalized = email.trim().toLowerCase();
+
+    const user = await this.prisma.user.findUnique({
+      where: { email: normalized },
+    });
+
+    if (!user) {
+      await new Promise((r) => setTimeout(r, 150));
+      return genericResp;
+    }
+
+    const recent = await this.prisma.passwordResetToken.findFirst({
+      where: { userId: user.id },
+      orderBy: { createdAt: "desc" },
+    });
+    if (recent) {
+      const msSince = Date.now() - new Date(recent.createdAt).getTime();
+      const cooldownMs = 60 * 1000; // 60 seconds
+      if (msSince < cooldownMs) {
+        this.logger.verbose(
+          `Password reset requested too soon for user ${user.id}`
+        );
+        return genericResp;
+      }
+    }
 
     const tokenRec = await this.tokenService.createPasswordResetToken(user.id);
-    const resetUrl = this.urlService.resetUrl(tokenRec.token);
 
-    const emailContext = {
-      email: user.email,
-      resetUrl,
-    };
+    // Build reset URL and email context
+    const resetUrl = this.urlService.resetUrl(tokenRec.token);
+    const emailContext = { email: user.email, resetUrl };
 
     try {
       await this.mailer.sendResetPasswordEmail(user.email!, emailContext);
     } catch (error) {
-      await this.tokenService.deletePasswordResetToken(tokenRec.id);
+      try {
+        await this.tokenService.deletePasswordResetToken(tokenRec.id);
+      } catch (delErr) {
+        this.logger.error(
+          "Failed to delete password reset token after email failure: " +
+            ((delErr as any)?.message ?? delErr)
+        );
+      }
       this.logger.error(
         "Failed to send reset email:",
         (error as any)?.message ?? error
@@ -430,7 +468,6 @@ export class AuthService {
       return { ok: true, message: "Email already verified" };
     }
 
-    // simple cooldown to avoid spamming the mailer
     const latestToken = await this.prisma.verificationToken.findFirst({
       where: { userId: user.id },
       orderBy: { createdAt: "desc" },
@@ -484,31 +521,31 @@ export class AuthService {
       throw new BadRequestException("Passwords do not match");
     if (!isStrongPassword(password))
       throw new BadRequestException("Password is not strong enough");
-  
+
     const rec = await this.tokenService.findPasswordResetToken(token);
     if (!rec || rec.used || rec.expiresAt < new Date())
       throw new BadRequestException("Invalid or expired token");
-  
+
     const hashed = await bcrypt.hash(password, 10);
-  
+
     const user = await this.prisma.$transaction(async (tx) => {
       const updatedUser = await tx.user.update({
         where: { id: rec.userId },
         data: {
           password: hashed,
-          isVerified: true,    
+          isVerified: true,
         },
-        include: { company: true }, 
+        include: { company: true },
       });
-  
+
       await tx.passwordResetToken.update({
         where: { id: rec.id },
         data: { used: true },
       });
-  
+
       return updatedUser;
     });
-  
+
     const payload = {
       sub: user.id,
       email: user.email,
@@ -516,11 +553,11 @@ export class AuthService {
       kind: user.kind,
     };
     const accessToken = this.signAccessToken(payload);
-  
+
     const rawRefresh = this.createRefreshTokenRaw();
     const tokenHash = this.hashToken(rawRefresh);
     const expiresAt = add(new Date(), { days: this.refreshDays });
-  
+
     await this.prisma.refreshToken.create({
       data: {
         userId: user.id,
@@ -529,7 +566,7 @@ export class AuthService {
         expiresAt,
       },
     });
-  
+
     return {
       ok: true,
       accessToken,
@@ -540,7 +577,10 @@ export class AuthService {
         phone: user.phone,
         role: user.role,
         name: user.company?.fullName ?? "User",
+        company: user.company
+          ? { id: user.company.id, businessName: user.company.businessName }
+          : null,
       },
     };
-  }  
+  }
 }

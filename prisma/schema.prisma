@@ -115,7 +115,7 @@ model Company {
   id              String   @id @default(cuid())
   fullName        String
   phoneNumber     String
-  emailAddress    String
+  emailAddress    String   @unique
   businessName    String
   businessAddress String
   createdAt       DateTime @default(now())
