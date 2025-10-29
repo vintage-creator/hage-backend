@@ -59,17 +59,6 @@ enum ShipmentStatus {
   CANCELLED
 }
 
-enum PickupMode {
-  PICKUP
-  DROPOFF
-}
-
-enum ServiceType {
-  AIR
-  OCEAN
-  ROAD
-  RAIL
-}
 
 enum DocumentType {
   COMMERCIAL_INVOICE
@@ -349,12 +338,12 @@ model Shipment {
   destination Json
 
   // PICKUP & DELIVERY
-  pickupMode   PickupMode
+  pickupMode   String
   pickupDate   DateTime?
   deliveryDate DateTime?
 
   // SERVICE & PRICING
-  serviceType  ServiceType
+  serviceType  String
   baseFrieght  Float
   handlingFee  Float
   insuranceFee Float?

@@ -236,8 +236,8 @@ describe("Shipments Complete E2E Tests", () => {
 				.field("cargoType", "Electronics")
 				.field("tons", "1")
 				.field("weight", "500")
-				.field("origin", JSON.stringify({ country: "Nigeria", state: "Lagos", address: "123 Main St" }))
-				.field("destination", JSON.stringify({ country: "UK", state: "London", address: "221B Baker St" }))
+				.field("origin", JSON.stringify({ country: "Nigeria", state: "Lagos", address: "123 Main St", phone: "82829228292" }))
+				.field("destination", JSON.stringify({ country: "UK", state: "London", address: "221B Baker St", phone: "82829228292" }))
 				.field("pickupMode", "PICKUP")
 				.field("serviceType", "AIR")
 				.field("baseFrieght", "2000")
@@ -274,14 +274,33 @@ describe("Shipments Complete E2E Tests", () => {
 				.field("cargoType", "Machinery")
 				.field("tons", "2")
 				.field("weight", "2000")
-				.field("origin", JSON.stringify({ country: "Nigeria", state: "Lagos", address: "456 Enterprise Rd" }))
-				.field("destination", JSON.stringify({ country: "USA", state: "New York", address: "123 5th Ave" }))
+				.field(
+					"origin",
+					JSON.stringify({
+						country: "Nigeria",
+						state: "Lagos",
+						address: "456 Enterprise Rd",
+						phone: "82829228292",
+					})
+				)
+				.field(
+					"destination",
+					JSON.stringify({
+						country: "USA",
+						state: "New York",
+						address: "123 5th Ave",
+						phone: "82829228292",
+					})
+				)
 				.field("pickupMode", "PICKUP")
 				.field("serviceType", "ROAD")
 				.field("baseFrieght", "5000")
 				.field("handlingFee", "1000")
 				.field("insuranceFee", "500")
+				.attach("documents", Buffer.from("dummy packing list"), "packing_list.pdf")
 				.expect(201);
+
+			// console.log(res);
 
 			expect(res.body.createdBy).toBe(enterpriseUserId);
 			expect(res.body.status).toBe("PENDING_ACCEPTANCE");

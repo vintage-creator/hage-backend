@@ -29,6 +29,15 @@ export class ShipmentsService {
 	// CREATE SHIPMENT (Step 1: Order Creation)
 	async create(dto: any, lspUserId: string, files?: Express.Multer.File[]): Promise<Shipment> {
 		try {
+			// Required field validation
+			const requiredFields = ["clientName", "cargoType", "weight", "origin", "destination", "pickupMode", "serviceType", "baseFrieght", "handlingFee"];
+
+			for (const field of requiredFields) {
+				if (dto[field] === undefined || dto[field] === null || dto[field] === "" || (typeof dto[field] === "object" && Object.keys(dto[field]).length === 0)) {
+					throw new BadRequestException(`${field} is required`);
+				}
+			}
+
 			// Upload documents concurrently
 			const uploadPromises = files?.map((file) => this.storage.uploadFile(file, { folder: "shipment-documents" })) ?? [];
 			const uploadedDocs = await Promise.all(uploadPromises);
@@ -63,7 +72,6 @@ export class ShipmentsService {
 					},
 				});
 
-				// Create status history entry
 				await tx.shipmentStatusHistory.create({
 					data: {
 						shipmentId: createdShipment.id,
@@ -72,7 +80,6 @@ export class ShipmentsService {
 					},
 				});
 
-				// Upload and link documents
 				if (uploadedDocs.length > 0) {
 					await tx.shipmentDocument.createMany({
 						data: uploadedDocs.map((doc, index) => ({
@@ -91,15 +98,14 @@ export class ShipmentsService {
 				await this.mailer.sendShipmentCreated(dto.email, {
 					clientName: dto.clientName,
 					trackingNumber: dto.orderId,
-					origin: (dto.origin as any).country,
-					destination: (dto.destination as any).country,
+					origin: dto.origin?.country,
+					destination: dto.destination?.country,
 					estimatedDelivery: dto.deliveryDate ? new Date(dto.deliveryDate).toDateString() : "TBD",
 					status: "Pending Acceptance",
 					trackingUrl: `${this.cfg.get("APP_URL")}/shipments/track/${dto.orderId}`,
 				});
 			}
 
-			// Create in-app notification
 			await this.createNotification(lspUserId, `New shipment ${dto.orderId} created successfully`, "in-app");
 
 			return shipment;

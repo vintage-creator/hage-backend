@@ -1,18 +1,6 @@
 import { IsString, IsEmail, IsOptional, IsNotEmpty, IsNumber, IsEnum, Min, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
 
-export enum PickupMode {
-	PICKUP = "PICKUP",
-	DROPOFF = "DROPOFF",
-}
-
-export enum ServiceType {
-	AIR = "AIR",
-	OCEAN = "OCEAN",
-	ROAD = "ROAD",
-	RAIL = "RAIL",
-}
-
 class LocationDto {
 	@IsString({ message: "Country must be a string" })
 	@IsNotEmpty({ message: "Country is required" })
@@ -85,7 +73,6 @@ export class CreateShipmentDto {
 	destination!: LocationDto;
 
 	// Pickup & Delivery
-	@IsEnum(PickupMode, { message: "Pickup mode must be either PICKUP or DROPOFF" })
 	@IsNotEmpty({ message: "Pickup mode is required" })
 	pickupMode!: string;
 
@@ -96,9 +83,6 @@ export class CreateShipmentDto {
 	deliveryDate?: string;
 
 	// Service & Pricing
-	@IsEnum(ServiceType, {
-		message: "Service type must be one of: AIR, OCEAN, ROAD, or RAIL",
-	})
 	@IsNotEmpty({ message: "Service type is required" })
 	serviceType!: string;
 
