@@ -1,6 +1,7 @@
 // src/modules/auth/auth.controller.ts
 import { Response } from "express";
-import * as multer from "multer";
+import { memoryStorage } from 'multer';
+import * as path from 'path';
 import {
   Body,
   Controller,
@@ -31,8 +32,25 @@ import { RegisterCompanyDto } from "./dto/register-company.dto";
 import { CreatePasswordDto } from "./dto/create-password.dto";
 import { LoginDto } from "./dto/login.dto";
 import { ForgotPasswordRequestDto } from "./dto/forgot-password-request.dto";
-import { ResetPasswordDto } from "./dto/reset-password.dto";
 import { LogoutDto } from "./dto/logout.dto";
+
+type FileFilterCallback = (error: Error | null, acceptFile: boolean) => void;
+
+const pdfFileFilter = (
+  _req: Request, 
+  file: Express.Multer.File,
+  cb: FileFilterCallback
+) => {
+  const ext = path.extname(file.originalname).toLowerCase();
+  const isPdfMime = file.mimetype === 'application/pdf';
+  const isPdfExt = ext === '.pdf';
+
+  if (isPdfMime && isPdfExt) {
+    cb(null, true);
+  } else {
+    cb(new BadRequestException('Only PDF files are allowed'), false);
+  }
+};
 
 @ApiTags("auth")
 @Controller("auth")
@@ -55,9 +73,12 @@ export class AuthController {
         { name: "taxCert", maxCount: 1 },
       ],
       {
-        storage: multer.memoryStorage(),
-        limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
-      }
+        storage: memoryStorage(), 
+        fileFilter: pdfFileFilter,
+        limits: {
+          fileSize: 5 * 1024 * 1024, // 5 MB per file (adjust as needed)
+        },
+      },
     )
   )
   @ApiBody({

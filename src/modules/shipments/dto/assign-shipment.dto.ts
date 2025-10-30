@@ -1,12 +1,22 @@
-// src/modules/shipments/dto/assign-shipment.dto.ts
-import { IsString, IsOptional } from "class-validator";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { IsUUID, IsOptional, IsString } from "class-validator";
 
 export class AssignShipmentDto {
-	@IsString()
-	@IsOptional()
-	transporterId?: string;
+  @ApiPropertyOptional({
+    description:
+      "ID of the transporter (user.id). Must be a user with role = TRANSPORTER.",
+    example: "user_transporter_id_123",
+  })
+  @IsOptional()
+  @IsString()
+  transporterId?: string;
 
-	@IsString()
-	@IsOptional()
-	warehouseId?: string;
+  @ApiPropertyOptional({
+    description:
+      "ID of the warehouse where this shipment will be stored/processed.",
+    example: "warehouse_id_456",
+  })
+  @IsOptional()
+  @IsString()
+  warehouseId?: string;
 }
