@@ -65,6 +65,12 @@ enum PickupMode {
   SCHEDULED
 }
 
+enum ServiceType {
+  AIR
+  SEA
+  LAND
+}
+
 enum DocumentType {
   COMMERCIAL_INVOICE
   PACKING_LIST
@@ -349,6 +355,7 @@ model Shipment {
 
   // SERVICE & PRICING
   serviceType  String
+  serviceType_new  ServiceType? 
   baseFrieght  Float
   handlingFee  Float
   insuranceFee Float?
