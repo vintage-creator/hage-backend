@@ -60,15 +60,15 @@ enum ShipmentStatus {
 }
 
 enum PickupMode {
-  PICKUP
-  DROP_OFF
-  SCHEDULED
+  AIR_FREIGHT
+  SEA_FREIGHT
+  ROAD
 }
 
 enum ServiceType {
-  AIR
-  SEA
-  LAND
+  EXPRESS_SHIPPING
+  REGULAR_SHIPPING
+  COLDCHAIN_SHIPPING
 }
 
 enum DocumentType {
