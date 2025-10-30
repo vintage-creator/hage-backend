@@ -406,6 +406,7 @@ export class AuthService {
 
     const user = await this.prisma.user.findUnique({
       where: { email: normalized },
+      include: { company: true },
     });
 
     if (!user) {
@@ -432,7 +433,10 @@ export class AuthService {
 
     // Build reset URL and email context
     const resetUrl = this.urlService.resetUrl(tokenRec.token);
-    const emailContext = { email: user.email, resetUrl };
+    const emailContext = {
+      fullName: user.company?.fullName ?? user.email,
+      resetUrl,
+    };
 
     try {
       await this.mailer.sendResetPasswordEmail(user.email!, emailContext);
