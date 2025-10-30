@@ -1,6 +1,5 @@
-// src/common/mail/mail.service.ts
 import { Injectable, Logger } from "@nestjs/common";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import { ConfigService } from "@nestjs/config";
 import fs from "fs";
 import path from "path";
@@ -10,47 +9,75 @@ import juice from "juice";
 
 @Injectable()
 export class MailService {
-  private transporter;
+  private resend: Resend;
   private logger = new Logger(MailService.name);
-  private templatesDir = path.join(__dirname, "templates");
+  private templatesDir: string;
 
   constructor(private cfg: ConfigService) {
-    this.transporter = nodemailer.createTransport({
-      host: cfg.get("SMTP_HOST"),
-      port: Number(cfg.get("SMTP_PORT") ?? 587),
-      secure: cfg.get("SMTP_SECURE") === "true",
-      auth: {
-        user: cfg.get("SMTP_USER"),
-        pass: cfg.get("SMTP_PASS"),
-      },
-    });
-    this.transporter.verify((err, success) => {
-      if (err) {
-        this.logger.error("SMTP verify failed: " + (err.message ?? err));
-      } else {
-        this.logger.verbose("SMTP transporter verified and ready");
+    this.templatesDir = this.findTemplatesDir();
+    this.logger.log(`Using templates directory: ${this.templatesDir}`);
+
+    const apiKey = this.cfg.get<string>("RESEND_API_KEY");
+    if (!apiKey) {
+      this.logger.warn("RESEND_API_KEY not set — emails will fail until configured");
+    }
+    this.resend = new Resend(apiKey ?? "");
+
+    this.testConnection();
+  }
+
+  private findTemplatesDir(): string {
+    const possiblePaths = [
+      path.join(process.cwd(), "src", "common", "mail", "templates"),
+      path.join(process.cwd(), "dist", "common", "mail", "templates"),
+      path.join(__dirname, "templates"),
+      path.join(process.cwd(), "common", "mail", "templates"),
+    ];
+
+    for (const dirPath of possiblePaths) {
+      this.logger.log(`Checking for templates at: ${dirPath}`);
+      if (fs.existsSync(dirPath)) {
+        const files = fs.readdirSync(dirPath);
+        this.logger.log(`Found templates directory with files: ${files.join(", ")}`);
+        return dirPath;
       }
-    });
+    }
+
+    throw new Error(
+      `Could not find templates directory. Checked: ${possiblePaths.join(", ")}`
+    );
+  }
+
+  private testConnection() {
+    const apiKey = this.cfg.get<string>("RESEND_API_KEY");
+    if (!apiKey) {
+      this.logger.error("Resend API key missing (RESEND_API_KEY). Set it in environment.");
+    } else {
+      // We don't send a test email automatically to avoid spamming.
+      this.logger.log("Resend configured (RESEND_API_KEY present). Verify sending domain in Resend dashboard.");
+    }
   }
 
   private loadTemplate(templateName: string) {
     try {
       const mjmlPath = path.join(this.templatesDir, `${templateName}.mjml`);
-      const txtPath = path.join(
-        this.templatesDir,
-        "text",
-        `${templateName}.txt.hbs`
-      );
+      const txtPath = path.join(this.templatesDir, "text", `${templateName}.txt.hbs`);
+
+      this.logger.log(`Loading MJML from: ${mjmlPath}`);
+      this.logger.log(`Loading text template from: ${txtPath}`);
+
+      if (!fs.existsSync(mjmlPath)) {
+        throw new Error(`MJML template not found: ${mjmlPath}`);
+      }
+
       const mjmlSource = fs.readFileSync(mjmlPath, "utf8");
-      const txtSource = fs.existsSync(txtPath)
-        ? fs.readFileSync(txtPath, "utf8")
-        : "";
+      const txtSource = fs.existsSync(txtPath) ? fs.readFileSync(txtPath, "utf8") : "";
+
+      this.logger.log(`Successfully loaded template: ${templateName}`);
       return { mjmlSource, txtSource };
     } catch (err) {
       this.logger.error(
-        `Failed loading email template "${templateName}": ${
-          (err as any).message
-        }`
+        `Failed loading email template "${templateName}": ${(err as any).message}`
       );
       throw err;
     }
@@ -70,21 +97,16 @@ export class MailService {
     try {
       const { mjmlSource, txtSource } = this.loadTemplate(templateName);
 
-      // build context with defaults
       const fullCtx = {
         year: new Date().getFullYear(),
         appName: this.cfg.get("APP_NAME") ?? "Hage Logistics",
-        logoUrl:
-          this.cfg.get("APP_LOGO") ?? `${this.cfg.get("APP_URL")}/logo.png`,
-        supportText:
-          this.cfg.get("SUPPORT_TEXT") ??
-          "Need help? Contact hello@tryhage.com",
+        logoUrl: this.cfg.get("APP_LOGO") ?? `${this.cfg.get("APP_URL")}/logo.png`,
+        supportText: this.cfg.get("SUPPORT_TEXT") ?? "Need help? Contact hello@tryhage.com",
         ...context,
       };
 
       const mjmlWithVars = this.compile(mjmlSource, fullCtx);
 
-      // convert to HTML
       const { html, errors } = mjml2html(mjmlWithVars, {
         validationLevel: "soft",
       });
@@ -92,42 +114,41 @@ export class MailService {
         this.logger.warn("MJML warnings: " + JSON.stringify(errors));
       }
 
-      // optional: inline CSS (MJML already produces email-friendly HTML but juice can help for extra inlining)
       const inlined = juice(html);
 
-      // compile plain text
-      const text = txtSource
-        ? this.compile(txtSource, fullCtx)
-        : this.stripHtmlToText(inlined);
+      const text = txtSource ? this.compile(txtSource, fullCtx) : this.stripHtmlToText(inlined);
 
-      // send email
-      const mail = {
-        from: this.cfg.get("MAIL_FROM"),
-        to,
+      const from = this.cfg.get("MAIL_FROM");
+      if (!from) {
+        throw new Error("MAIL_FROM is not configured");
+      }
+
+      // Send via Resend SDK
+      const { data, error } = await this.resend.emails.send({
+        from,
+        to: [to],
         subject,
         html: inlined,
         text,
-      };
+      });
 
-      const info = await this.transporter.sendMail(mail);
-      this.logger.verbose(`Email sent to ${to} (${info.messageId})`);
-      return info;
+      if (error) {
+        this.logger.error(`Resend error sending email: ${JSON.stringify(error)}`);
+        throw new Error(error?.message ?? "Unknown resend error");
+      }
+
+      this.logger.verbose(`Email sent to ${to} (id=${data?.id})`);
+      return data;
     } catch (err) {
       this.logger.error(
-        `Failed to send email [template=${templateName}, to=${to}]: ${
-          (err as any).message
-        }`
+        `Failed to send email [template=${templateName}, to=${to}]: ${(err as any).message}`
       );
       throw err;
     }
   }
 
   private stripHtmlToText(html: string) {
-    // simple fallback: remove tags and collapse whitespace
-    return html
-      .replace(/<\/?[^>]+(>|$)/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
+    return html.replace(/<\/?[^>]+(>|$)/g, "").replace(/\s+/g, " ").trim();
   }
 
   // convenience helpers
@@ -142,21 +163,12 @@ export class MailService {
   }
 
   async sendShipmentCreated(email: string, context: any) {
-    const subject = `${this.cfg.get("APP_NAME")}: Shipment ${
-      context.trackingNumber
-    } created`;
+    const subject = `${this.cfg.get("APP_NAME")}: Shipment ${context.trackingNumber} created`;
     return this.sendFromTemplate(email, subject, "shipment-created", context);
   }
 
   async sendShipmentStatusUpdate(email: string, context: any) {
-    const subject = `${this.cfg.get("APP_NAME")}: Shipment ${
-      context.trackingNumber
-    } status updated`;
-    return this.sendFromTemplate(
-      email,
-      subject,
-      "shipment-status-update",
-      context
-    );
+    const subject = `${this.cfg.get("APP_NAME")}: Shipment ${context.trackingNumber} status updated`;
+    return this.sendFromTemplate(email, subject, "shipment-status-update", context);
   }
 }
