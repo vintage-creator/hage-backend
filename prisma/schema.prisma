@@ -59,6 +59,11 @@ enum ShipmentStatus {
   CANCELLED
 }
 
+enum PickupMode {
+  PICKUP
+  DROP_OFF
+  SCHEDULED
+}
 
 enum DocumentType {
   COMMERCIAL_INVOICE
@@ -338,7 +343,7 @@ model Shipment {
   destination Json
 
   // PICKUP & DELIVERY
-  pickupMode   String
+  pickupMode   PickupMode
   pickupDate   DateTime?
   deliveryDate DateTime?
 
