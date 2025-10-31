@@ -7,312 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id                    String                  @id @default(cuid())
-  email                 String?                 @unique
-  phone                 String?                 @unique
-  password              String?
-  kind                  UserKind
-  role                  RoleType?
-  companyId             String?
-  isVerified            Boolean                 @default(false)
-  createdAt             DateTime                @default(now())
-  updatedAt             DateTime                @updatedAt
-  Notification          Notification[]
-  passwordResetTokens   PasswordResetToken[]
-  refreshTokens         RefreshToken[]
-  transporterShipments  Shipment[]              @relation("TransporterShipments")
-  createdShipments      Shipment[]              @relation("ShipmentCreator")
-  customerShipments     Shipment[]              @relation("CustomerShipments")
-  ShipmentStatusHistory ShipmentStatusHistory[]
-  company               Company?                @relation(fields: [companyId], references: [id])
-  verificationTokens    VerificationToken[]
-}
-
-model Company {
-  id                String              @id @default(cuid())
-  fullName          String
-  phoneNumber       String
-  emailAddress      String              @unique
-  businessName      String
-  businessAddress   String
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  InventoryLocation InventoryLocation[]
-  documents         TrackingDocument[]
-  users             User[]
-  Warehouse         Warehouse[]
-
-  @@index([emailAddress])
-}
-
-model TrackingDocument {
-  id         String   @id @default(cuid())
-  companyId  String
-  type       DocType
-  url        String
-  uploadedAt DateTime @default(now())
-  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-}
-
-model VerificationToken {
-  id        String   @id @default(cuid())
-  userId    String
-  token     String   @unique
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-model PasswordResetToken {
-  id        String   @id @default(cuid())
-  userId    String
-  token     String   @unique
-  expiresAt DateTime
-  used      Boolean  @default(false)
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-model RefreshToken {
-  id        String   @id @default(cuid())
-  userId    String
-  tokenHash String
-  userAgent String?
-  createdAt DateTime @default(now())
-  expiresAt DateTime
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-model Warehouse {
-  id                String          @id @default(cuid())
-  companyId         String
-  name              String
-  country           String
-  city              String
-  address           String
-  totalCapacity     Int
-  capacityUnit      String          @default("pieces")
-  status            WarehouseStatus @default(ACTIVE)
-  numZones          Int?
-  numRows           Int?
-  numRacks          Int?
-  numBinsPerRack    Int?
-  allowsTemperature Boolean         @default(false)
-  allowsHazardous   Boolean         @default(false)
-  allowsQuarantine  Boolean         @default(false)
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  Inventory         Inventory[]
-  shipments         Shipment[]      @relation("WarehouseShipments")
-  company           Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  zones             Zone[]
-
-  @@index([companyId])
-}
-
-model Zone {
-  id               String    @id @default(cuid())
-  warehouseId      String
-  name             String
-  tempMin          Float?
-  tempMax          Float?
-  allowsHazardous  Boolean   @default(false)
-  isQuarantineZone Boolean   @default(false)
-  capacity         Int?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  racks            Rack[]
-  warehouse        Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
-
-  @@index([warehouseId])
-}
-
-model Rack {
-  id        String   @id @default(cuid())
-  zoneId    String
-  name      String
-  capacity  Int?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  bins      Bin[]
-  zone      Zone     @relation(fields: [zoneId], references: [id], onDelete: Cascade)
-
-  @@index([zoneId])
-}
-
-model Bin {
-  id                 String              @id @default(cuid())
-  rackId             String
-  name               String
-  capacity           Int
-  currentQty         Int                 @default(0)
-  reservedQty        Int                 @default(0)
-  tempMin            Float?
-  tempMax            Float?
-  allowsHazardous    Boolean             @default(false)
-  isQuarantine       Boolean             @default(false)
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  rack               Rack                @relation(fields: [rackId], references: [id], onDelete: Cascade)
-  InventoryLocations InventoryLocation[]
-
-  @@index([rackId])
-  @@index([currentQty, reservedQty])
-}
-
-/// *
-///  * --- Product / Inventory models ---
-model Product {
-  id          String      @id @default(cuid())
-  sku         String      @unique
-  name        String
-  unit        String      @default("pieces")
-  tempMin     Float?
-  tempMax     Float?
-  isHazardous Boolean     @default(false)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  inventory   Inventory[]
-}
-
-model Inventory {
-  id          String              @id @default(cuid())
-  productId   String
-  warehouseId String
-  totalQty    Int                 @default(0)
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-  product     Product             @relation(fields: [productId], references: [id])
-  warehouse   Warehouse           @relation(fields: [warehouseId], references: [id])
-  locations   InventoryLocation[]
-
-  @@unique([productId, warehouseId], name: "product_warehouse_unique")
-  @@index([warehouseId])
-}
-
-model InventoryLocation {
-  id                String                  @id @default(cuid())
-  inventoryId       String
-  binId             String
-  qty               Int
-  shipmentId        String?
-  clientId          String?
-  clientName        String?
-  status            InventoryLocationStatus @default(AVAILABLE)
-  condition         InventoryCondition?
-  lotNumber         String?
-  expiryDate        DateTime?
-  specialHandling   Json?
-  tempMin           Float?
-  tempMax           Float?
-  isHazardous       Boolean?                @default(false)
-  itemCompatibility String[]                @default([])
-  createdBy         String?
-  createdAt         DateTime                @default(now())
-  updatedAt         DateTime                @updatedAt
-  companyId         String?
-  bin               Bin                     @relation(fields: [binId], references: [id], onDelete: Cascade)
-  Company           Company?                @relation(fields: [companyId], references: [id])
-  inventory         Inventory               @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
-
-  @@index([binId])
-  @@index([clientId])
-  @@index([shipmentId])
-  @@index([status])
-}
-
-model Shipment {
-  id                    String                  @id @default(uuid())
-  orderId               String                  @unique
-  clientName            String
-  email                 String?
-  phone                 String?
-  cargoType             String
-  tons                  Float
-  weight                Float
-  handlingInstructions  String?
-  origin                Json
-  destination           Json
-  pickupMode            PickupMode
-  pickupDate            DateTime?
-  deliveryDate          DateTime?
-  serviceType           String
-  baseFrieght           Float
-  handlingFee           Float
-  insuranceFee          Float?
-  totalCost             Float
-  status                ShipmentStatus          @default(PENDING_ACCEPTANCE)
-  assignedTransporterId String?
-  assignedWarehouseId   String?
-  createdBy             String
-  customerId            String
-  createdAt             DateTime                @default(now())
-  updatedAt             DateTime                @updatedAt
-  serviceType_new       ServiceType?
-  transporter           User?                   @relation("TransporterShipments", fields: [assignedTransporterId], references: [id])
-  warehouse             Warehouse?              @relation("WarehouseShipments", fields: [assignedWarehouseId], references: [id])
-  creator               User                    @relation("ShipmentCreator", fields: [createdBy], references: [id])
-  customer              User                    @relation("CustomerShipments", fields: [customerId], references: [id])
-  documents             ShipmentDocument[]
-  statusHistory         ShipmentStatusHistory[]
-  events                TrackingEvent[]
-
-  @@index([orderId])
-  @@index([status])
-  @@index([customerId])
-  @@index([createdBy])
-}
-
-model ShipmentDocument {
-  id         String       @id @default(uuid())
-  shipmentId String
-  docType    DocumentType
-  url        String
-  uploadedAt DateTime     @default(now())
-  shipment   Shipment     @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
-
-  @@index([shipmentId])
-}
-
-model ShipmentStatusHistory {
-  id            String         @id @default(uuid())
-  shipmentId    String
-  status        ShipmentStatus
-  note          String?
-  updatedBy     String
-  timestamp     DateTime       @default(now())
-  shipment      Shipment       @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
-  updatedByUser User           @relation(fields: [updatedBy], references: [id])
-
-  @@index([shipmentId])
-  @@index([timestamp])
-}
-
-model TrackingEvent {
-  id         String   @id @default(cuid())
-  shipmentId String
-  status     String
-  location   String?
-  note       String?
-  timestamp  DateTime @default(now())
-  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
-
-  @@index([shipmentId])
-}
-
-model Notification {
-  id        String           @id @default(cuid())
-  userId    String
-  message   String
-  type      NotificationType
-  read      Boolean          @default(false)
-  createdAt DateTime         @default(now())
-  user      User             @relation(fields: [userId], references: [id])
-
-  @@index([userId, read])
-}
-
 enum UserKind {
   ENTERPRISE
   DISTRIBUTOR
@@ -365,17 +59,6 @@ enum ShipmentStatus {
   CANCELLED
 }
 
-enum PickupMode {
-  AIR_FREIGHT
-  SEA_FREIGHT
-  ROAD
-}
-
-enum ServiceType {
-  EXPRESS_SHIPPING
-  REGULAR_SHIPPING
-  COLDCHAIN_SHIPPING
-}
 
 enum DocumentType {
   COMMERCIAL_INVOICE
@@ -389,4 +72,360 @@ enum NotificationType {
   EMAIL
   IN_APP
   SMS
+}
+
+model User {
+  id         String    @id @default(cuid())
+  email      String?   @unique
+  phone      String?   @unique
+  password   String?
+  kind       UserKind
+  role       RoleType?
+  companyId  String?
+  isVerified Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  // relations
+  company             Company?             @relation(fields: [companyId], references: [id])
+  verificationTokens  VerificationToken[]
+  passwordResetTokens PasswordResetToken[]
+  refreshTokens       RefreshToken[]
+
+  // shipments relations (incoming models reference User)
+  createdShipments      Shipment[]              @relation("ShipmentCreator")
+  customerShipments     Shipment[]              @relation("CustomerShipments")
+  transporterShipments  Shipment[]              @relation("TransporterShipments")
+  ShipmentStatusHistory ShipmentStatusHistory[]
+  Notification          Notification[]
+}
+
+model Company {
+  id              String   @id @default(cuid())
+  fullName        String
+  phoneNumber     String
+  emailAddress    String   @unique
+  businessName    String
+  businessAddress String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  documents         TrackingDocument[]
+  users             User[]
+  Warehouse         Warehouse[] // keep relation to warehouses
+  InventoryLocation InventoryLocation[]
+
+  @@index([emailAddress])
+}
+
+model TrackingDocument {
+  id         String   @id @default(cuid())
+  companyId  String
+  type       DocType
+  url        String
+  uploadedAt DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String
+  userAgent String?
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Warehouse {
+  id            String          @id @default(cuid())
+  companyId     String
+  name          String
+  country       String
+  city          String
+  address       String
+  totalCapacity Int // capacity measured in "capacityUnit"
+  capacityUnit  String          @default("pieces")
+  status        WarehouseStatus @default(ACTIVE)
+
+  numZones       Int?
+  numRows        Int?
+  numRacks       Int?
+  numBinsPerRack Int?
+
+  allowsTemperature Boolean @default(false)
+  allowsHazardous   Boolean @default(false)
+  allowsQuarantine  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  zones     Zone[]
+  Inventory Inventory[]
+
+  shipments Shipment[] @relation("WarehouseShipments")
+
+  @@index([companyId])
+}
+
+model Zone {
+  id               String   @id @default(cuid())
+  warehouseId      String
+  name             String
+  tempMin          Float? // nullable temperature range (capability)
+  tempMax          Float?
+  allowsHazardous  Boolean  @default(false)
+  isQuarantineZone Boolean  @default(false)
+  capacity         Int?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  racks     Rack[]
+
+  @@index([warehouseId])
+}
+
+model Rack {
+  id        String   @id @default(cuid())
+  zoneId    String
+  name      String
+  capacity  Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  zone Zone  @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  bins Bin[]
+
+  @@index([zoneId])
+}
+
+model Bin {
+  id              String   @id @default(cuid())
+  rackId          String
+  name            String
+  capacity        Int // capacity in same unit as warehouse
+  currentQty      Int      @default(0) // actual stored qty
+  reservedQty     Int      @default(0) // sum of active reservations
+  tempMin         Float?
+  tempMax         Float?
+  allowsHazardous Boolean  @default(false)
+  isQuarantine    Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  rack               Rack                @relation(fields: [rackId], references: [id], onDelete: Cascade)
+  InventoryLocations InventoryLocation[]
+
+  @@index([rackId])
+  @@index([currentQty, reservedQty])
+}
+
+/**
+ * --- Product / Inventory models ---
+ */
+model Product {
+  id          String   @id @default(cuid())
+  sku         String   @unique
+  name        String
+  unit        String   @default("pieces")
+  tempMin     Float?
+  tempMax     Float?
+  isHazardous Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  inventory Inventory[]
+}
+
+model Inventory {
+  id          String   @id @default(cuid())
+  productId   String
+  warehouseId String
+  totalQty    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  product   Product             @relation(fields: [productId], references: [id])
+  warehouse Warehouse           @relation(fields: [warehouseId], references: [id])
+  locations InventoryLocation[]
+
+  @@unique([productId, warehouseId], name: "product_warehouse_unique")
+  @@index([warehouseId])
+}
+
+model InventoryLocation {
+  id          String @id @default(cuid())
+  inventoryId String
+  binId       String
+  qty         Int
+
+  // provenance / UI fields
+  shipmentId String? // external shipment id (optional)
+  clientId   String? // optional FK to Company
+  clientName String? // denormalized snapshot of client name
+
+  // per-location metadata
+  status          InventoryLocationStatus @default(AVAILABLE)
+  condition       InventoryCondition?
+  lotNumber       String? // optional batch/lot
+  expiryDate      DateTime? // optional expiry
+  specialHandling Json? // e.g., { tempMin: 2, tempMax: 8, isHazardous: true, compatibility: ["food","pharma"] }
+
+  // denormalized fields for fast filtering/searching (kept in schema but should be derived from specialHandling)
+  tempMin           Float?
+  tempMax           Float?
+  isHazardous       Boolean? @default(false)
+  itemCompatibility String[] @default([])
+
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  inventory Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  bin       Bin       @relation(fields: [binId], references: [id], onDelete: Cascade)
+  Company   Company?  @relation(fields: [companyId], references: [id])
+  companyId String?
+
+  // indexing for fast UI filters
+  @@index([binId])
+  @@index([clientId])
+  @@index([shipmentId])
+  @@index([status])
+}
+
+model Shipment {
+  id      String @id @default(uuid())
+  orderId String @unique // e.g. SHP-2025-00001
+
+  // CLIENT DETAILS
+  clientName String
+  email      String?
+  phone      String?
+
+  // CARGO DETAILS
+  cargoType            String
+  tons                 Float
+  weight               Float
+  handlingInstructions String?
+
+  // ORIGIN & DESTINATION (JSON format)
+  origin      Json // {country, region, state, lga, address}
+  destination Json
+
+  // PICKUP & DELIVERY
+  pickupMode   String
+  pickupDate   DateTime?
+  deliveryDate DateTime?
+
+  // SERVICE & PRICING
+  serviceType  String
+  baseFrieght  Float
+  handlingFee  Float
+  insuranceFee Float?
+  totalCost    Float
+
+  // STATUS & ASSIGNMENT
+  status                ShipmentStatus @default(PENDING_ACCEPTANCE)
+  assignedTransporterId String?
+  assignedWarehouseId   String?
+
+  // TRACKING
+  createdBy  String
+  customerId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // RELATIONS
+  creator     User       @relation("ShipmentCreator", fields: [createdBy], references: [id])
+  customer    User       @relation("CustomerShipments", fields: [customerId], references: [id])
+  transporter User?      @relation("TransporterShipments", fields: [assignedTransporterId], references: [id])
+  warehouse   Warehouse? @relation("WarehouseShipments", fields: [assignedWarehouseId], references: [id])
+
+  documents     ShipmentDocument[]
+  statusHistory ShipmentStatusHistory[]
+  events        TrackingEvent[]
+
+  @@index([orderId])
+  @@index([status])
+  @@index([customerId])
+  @@index([createdBy])
+}
+
+model ShipmentDocument {
+  id         String       @id @default(uuid())
+  shipmentId String
+  docType    DocumentType
+  url        String
+  uploadedAt DateTime     @default(now())
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId])
+}
+
+model ShipmentStatusHistory {
+  id         String         @id @default(uuid())
+  shipmentId String
+  status     ShipmentStatus
+  note       String?
+  updatedBy  String
+  timestamp  DateTime       @default(now())
+
+  shipment      Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  updatedByUser User     @relation(fields: [updatedBy], references: [id])
+
+  @@index([shipmentId])
+  @@index([timestamp])
+}
+
+model TrackingEvent {
+  id         String   @id @default(cuid())
+  shipmentId String
+  status     String
+  location   String?
+  note       String?
+  timestamp  DateTime @default(now())
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  message   String
+  type      NotificationType
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, read])
 }
