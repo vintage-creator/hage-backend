@@ -383,6 +383,7 @@ model ShipmentDocument {
   docType    DocumentType
   url        String
   uploadedAt DateTime     @default(now())
+  fileName   String
 
   shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
 
