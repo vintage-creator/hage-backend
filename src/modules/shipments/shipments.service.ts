@@ -124,7 +124,7 @@ export class ShipmentsService {
 							shipmentId: createdShipment.id,
 							docType: this.detectDocumentType(files?.[index]?.originalname) as any,
 							url: doc.url,
-							fileName: doc.name,
+              fileName: doc.name as any
 						})),
 					});
 				}
