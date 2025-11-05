@@ -488,6 +488,7 @@ export class ShipmentsService {
 							docType: true,
 							url: true,
 							uploadedAt: true,
+							fileName: true,
 						},
 					},
 					creator: {
