@@ -16,7 +16,7 @@ export class WarehousesService {
 	 */
 	private async generateWarehouseStructure(warehouseId: string, warehouse: any, numZones: number, numRacks: number, numBinsPerRack: number) {
 		// Standard zone types based on requirements
-		const standardZoneTypes = ["Receiving", "Storage", "Picking", "Packing", "Dispatch"];
+		const standardZoneTypes = ["Zone A", "Zone B", "Zone C", "Zone D", "Zone E", "Zone F"];
 
 		const zones: any[] = [];
 
@@ -27,13 +27,15 @@ export class WarehousesService {
 		for (let i = 0; i < numZones; i++) {
 			let zoneName: string;
 
-			// Use standard zone types first, then alphabetic naming
-			if (i < standardZoneTypes.length) {
-				zoneName = standardZoneTypes[i];
-			} else {
-				// Use alphabetic naming: Zone A, Zone B, Zone C, etc.
-				zoneName = `Zone ${String.fromCharCode(65 + (i - standardZoneTypes.length))}`;
-			}
+			zoneName = standardZoneTypes[i];
+
+			// // Use standard zone types first, then alphabetic naming
+			// if (i < standardZoneTypes.length) {
+			// 	zoneName = standardZoneTypes[i];
+			// } else {
+			// 	// Use alphabetic naming: Zone A, Zone B, Zone C, etc.
+			// 	zoneName = `Zone ${String.fromCharCode(65 + (i - standardZoneTypes.length))}`;
+			// }
 
 			// Determine if this is a special zone
 			const isLastZone = i === numZones - 1;
@@ -65,7 +67,7 @@ export class WarehousesService {
 
 			// Generate racks for this zone
 			for (let r = 0; r < racksForThisZone; r++) {
-				const rackName = `Rack ${globalRackCounter}`;
+				const rackName = `Rack A${globalRackCounter}`;
 				globalRackCounter++;
 
 				const rack = await this.prisma.rack.create({
@@ -80,7 +82,7 @@ export class WarehousesService {
 				const capacityPerBin = rack.capacity ? Math.floor(rack.capacity / numBinsPerRack) : Math.floor(warehouse.totalCapacity / (numRacks * numBinsPerRack));
 
 				for (let b = 1; b <= numBinsPerRack; b++) {
-					const binName = `Bin ${b}`;
+					const binName = `Bin 00${b}`;
 
 					await this.prisma.bin.create({
 						data: {
