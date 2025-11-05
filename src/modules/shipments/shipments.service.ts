@@ -164,10 +164,8 @@ export class ShipmentsService {
 
 	// ACCEPT & ASSIGN SHIPMENT (Step 2)
 	async acceptAndAssign(shipmentId: string, dto: AssignShipmentDto, lspUserId: string): Promise<Shipment> {
-		// 1. Verify user is LSP
-		const user = await this.prisma.user.findUnique({
-			where: { id: lspUserId },
-		});
+		// 1. Verify LSP
+		const user = await this.prisma.user.findUnique({ where: { id: lspUserId } });
 		if (!user) throw new NotFoundException("User not found");
 		if (user.kind !== "LOGISTIC_SERVICE_PROVIDER" && user.role !== "CROSS_BORDER_LOGISTICS") {
 			throw new ForbiddenException("Only LSP can accept and assign orders");
@@ -182,7 +180,7 @@ export class ShipmentsService {
 			throw new BadRequestException("Shipment already accepted or not pending");
 		}
 
-		// 3. Validate transporter exists and has correct role
+		// 3. Validate transporter
 		if (dto.transporterId) {
 			const transporter = await this.prisma.user.findUnique({
 				where: { id: dto.transporterId },
@@ -191,26 +189,62 @@ export class ShipmentsService {
 			if (transporter.role !== "TRANSPORTER") throw new BadRequestException("Invalid transporter");
 		}
 
-		// 4. Validate warehouse exists
+		// 4. Validate warehouse
+		let warehouse = null;
 		if (dto.warehouseId) {
-			const warehouse = await this.prisma.warehouse.findUnique({
+			warehouse = await this.prisma.warehouse.findUnique({
 				where: { id: dto.warehouseId },
 			});
 			if (!warehouse) throw new BadRequestException("Invalid warehouse");
 		}
 
-		// transaction updates and returns the updated shipment
+		// 5. Validate and attach zone/rack/bin selection if provided
+		let assignedLocation = null;
+		if (dto.zoneId && dto.rackId && dto.binId) {
+			const bin = await this.prisma.bin.findUnique({
+				where: { id: dto.binId },
+				include: {
+					rack: {
+						include: { zone: true },
+					},
+				},
+			});
+
+			if (!bin || bin.rack.zone.id !== dto.zoneId || bin.rack.id !== dto.rackId) {
+				throw new BadRequestException("Invalid or mismatched location details");
+			}
+
+			assignedLocation = {
+				zoneId: dto.zoneId,
+				rackId: dto.rackId,
+				binId: dto.binId,
+			};
+		}
+
+		const bin = await this.prisma.bin.findUnique({ where: { id: dto.binId } });
+		if (!bin) throw new NotFoundException("Bin not found");
+
+		if (bin.currentQty >= bin.capacity) {
+			throw new BadRequestException("Bin capacity is already full");
+		}
+
+		// 6. Perform transaction
 		const updated = await this.prisma.$transaction(async (tx) => {
+			// Update shipment
 			const updatedShipment = await tx.shipment.update({
 				where: { id: shipmentId },
 				data: {
 					status: ShipmentStatus.ACCEPTED as any,
 					assignedTransporterId: dto.transporterId,
 					assignedWarehouseId: dto.warehouseId,
+					assignedZoneId: assignedLocation?.zoneId || null,
+					assignedRackId: assignedLocation?.rackId || null,
+					assignedBinId: assignedLocation?.binId || null,
 				},
 				include: { transporter: true, warehouse: true },
 			});
 
+			// Log status history
 			await tx.shipmentStatusHistory.create({
 				data: {
 					shipmentId,
@@ -219,18 +253,30 @@ export class ShipmentsService {
 				},
 			});
 
+			// Increment bin occupancy by 1 since a shipment is assigned
+			if (assignedLocation) {
+				await tx.bin.update({
+					where: { id: assignedLocation.binId },
+					data: {
+						currentQty: {
+							increment: 1,
+						},
+					},
+				});
+			}
+
 			return updatedShipment;
 		});
 
-		// Notify assigned parties (createNotification now supports warehouse ids)
-		if (dto.transporterId) {
-			await this.createNotification(dto.transporterId, `You have been assigned to shipment ${updated.orderId}`, "in-app");
-		}
-		if (dto.warehouseId) {
-			await this.createNotification(dto.warehouseId, `Shipment ${updated.orderId} assigned to your warehouse`, "in-app");
-		}
+		// 7. Notifications
+		await Promise.all([
+			this.createNotification(lspUserId, `You accepted shipment ${updated.orderId}`, "in-app"),
+			this.createNotification(updated.customerId, `Shipment ${updated.orderId} has been accepted`, "in-app"),
+			dto.transporterId ? this.createNotification(dto.transporterId, `You have been assigned to shipment ${updated.orderId}`, "in-app") : Promise.resolve(),
+			dto.warehouseId ? this.createNotification(dto.warehouseId, `Shipment ${updated.orderId} assigned to your warehouse`, "in-app") : Promise.resolve(),
+		]);
 
-		// Send email using the updated shipment (safe parse + pretty formatting)
+		// 8. Send email to client
 		if (updated.email) {
 			const originObj = this.safeParseLocation(updated.origin ?? shipment.origin);
 			const destinationObj = this.safeParseLocation(updated.destination ?? shipment.destination);
@@ -247,14 +293,6 @@ export class ShipmentsService {
 				trackingUrl: `${this.cfg.get("APP_URL")}/shipments/track/${updated.orderId}`,
 			});
 		}
-
-		// Create Notifications for stakeholders (use updated values)
-		await Promise.all([
-			this.createNotification(lspUserId, `You accepted shipment ${updated.orderId}`, "in-app"),
-			this.createNotification(updated.customerId, `Shipment ${updated.orderId} has been accepted`, "in-app"),
-			dto.transporterId ? this.createNotification(dto.transporterId, `You have been assigned to shipment ${updated.orderId}`, "in-app") : Promise.resolve(),
-			dto.warehouseId ? this.createNotification(dto.warehouseId, `Shipment ${updated.orderId} assigned to your warehouse`, "in-app") : Promise.resolve(),
-		]);
 
 		return updated;
 	}

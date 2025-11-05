@@ -207,6 +207,7 @@ model Zone {
 
   warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
   racks     Rack[]
+  shipments Shipment[]
 
   @@index([warehouseId])
 }
@@ -221,6 +222,7 @@ model Rack {
 
   zone Zone  @relation(fields: [zoneId], references: [id], onDelete: Cascade)
   bins Bin[]
+  shipments Shipment[]
 
   @@index([zoneId])
 }
@@ -241,6 +243,7 @@ model Bin {
 
   rack               Rack                @relation(fields: [rackId], references: [id], onDelete: Cascade)
   InventoryLocations InventoryLocation[]
+  shipments Shipment[]
 
   @@index([rackId])
   @@index([currentQty, reservedQty])
@@ -364,6 +367,9 @@ model Shipment {
   status                ShipmentStatus @default(PENDING_ACCEPTANCE)
   assignedTransporterId String?
   assignedWarehouseId   String?
+  assignedZoneId        String?
+  assignedRackId        String?
+  assignedBinId         String?
 
   // TRACKING
   createdBy  String
@@ -377,16 +383,25 @@ model Shipment {
   customer    User       @relation("CustomerShipments", fields: [customerId], references: [id])
   transporter User?      @relation("TransporterShipments", fields: [assignedTransporterId], references: [id])
   warehouse   Warehouse? @relation("WarehouseShipments", fields: [assignedWarehouseId], references: [id])
-   inventory      Inventory[] 
 
-  documents     ShipmentDocument[]
-  statusHistory ShipmentStatusHistory[]
-  events        TrackingEvent[]
+  // Optional relations (you can uncomment if you have Zone, Rack, Bin models)
+  zone Zone? @relation(fields: [assignedZoneId], references: [id])
+  rack Rack? @relation(fields: [assignedRackId], references: [id])
+  bin  Bin?  @relation(fields: [assignedBinId], references: [id])
+
+  inventory      Inventory[]
+  documents      ShipmentDocument[]
+  statusHistory  ShipmentStatusHistory[]
+  events         TrackingEvent[]
 
   @@index([orderId])
   @@index([status])
   @@index([customerId])
   @@index([createdBy])
+  @@index([assignedWarehouseId])
+  @@index([assignedZoneId])
+  @@index([assignedRackId])
+  @@index([assignedBinId])
 }
 
 model ShipmentDocument {

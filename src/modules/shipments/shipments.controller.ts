@@ -141,8 +141,12 @@ export class ShipmentsController {
 	@ApiBearerAuth("access-token")
 	@ApiOperation({
 		summary: "Accept and assign a shipment",
-		description: "Allows Logistic Service Providers (LSPs) to accept and assign a shipment to a transporter or route for fulfillment.",
+		description: `
+	Allows Logistic Service Providers (LSPs) to accept and assign a shipment to 
+	a transporter, warehouse, and optionally specify zone, rack, and bin locations 
+	for warehouse placement.`,
 	})
+	@ApiBody({ type: AssignShipmentDto })
 	async acceptAndAssign(@Param("id") shipmentId: string, @Body() dto: AssignShipmentDto, @Req() req: Request) {
 		const userId = (req.user as any)?.id;
 		return this.svc.acceptAndAssign(shipmentId, dto, userId);
