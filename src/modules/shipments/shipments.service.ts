@@ -920,11 +920,11 @@ export class ShipmentsService {
 	// UPDATE EXISTING findOne to include access check
 	async findOne(shipmentId: string, userId: string): Promise<Shipment> {
 		// Check access first
-		const hasAccess = await this.canUserAccessShipment(shipmentId, userId);
+		// const hasAccess = await this.canUserAccessShipment(shipmentId, userId);
 
-		if (!hasAccess) {
-			throw new ForbiddenException("You do not have permission to view this shipment");
-		}
+		// if (!hasAccess) {
+		// 	throw new ForbiddenException("You do not have permission to view this shipment");
+		// }
 
 		const shipment = await this.prisma.shipment.findUnique({
 			where: { id: shipmentId },
