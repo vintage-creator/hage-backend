@@ -444,39 +444,28 @@ export class WarehousesService {
 			where: { id: warehouseId },
 		});
 
-		if (!warehouse) {
-			throw new NotFoundException("Warehouse not found");
-		}
+		if (!warehouse) throw new NotFoundException("Warehouse not found");
 
-		// Build query conditions
+		// Base query filter
 		const binConditions: any = {
 			rack: {
-				zone: {
-					warehouseId,
-				},
+				zone: { warehouseId },
 			},
 		};
 
-		// Filter by special requirements
+		// Apply conditions
 		if (options.requiresTemperature) {
 			binConditions.tempMin = { not: null };
 			binConditions.tempMax = { not: null };
-
 			if (options.tempMin !== undefined && options.tempMax !== undefined) {
 				binConditions.tempMin = { lte: options.tempMin };
 				binConditions.tempMax = { gte: options.tempMax };
 			}
 		}
+		if (options.isHazardous) binConditions.allowsHazardous = true;
+		if (options.needsQuarantine) binConditions.isQuarantine = true;
 
-		if (options.isHazardous) {
-			binConditions.allowsHazardous = true;
-		}
-
-		if (options.needsQuarantine) {
-			binConditions.isQuarantine = true;
-		}
-
-		// Find available bins
+		// Fetch bins (including nested relations)
 		const availableBins = await this.prisma.bin.findMany({
 			where: binConditions,
 			include: {
@@ -486,13 +475,9 @@ export class WarehousesService {
 					},
 				},
 			},
-			orderBy: [
-				{ currentQty: "asc" }, // Prefer bins with more available space
-				{ name: "asc" },
-			],
 		});
 
-		// Filter bins by available capacity
+		// Filter bins by capacity
 		const suitableBins = availableBins.filter((bin) => {
 			const availableCapacity = bin.capacity - bin.currentQty - bin.reservedQty;
 			return availableCapacity >= (options.requiredCapacity || 0);
@@ -502,40 +487,63 @@ export class WarehousesService {
 			return {
 				success: false,
 				message: "No suitable location found",
-				suggestion: null,
+				suggested: null,
+				categorized: [],
 			};
 		}
 
-		// Get the best suggestion
-		const bestBin = suitableBins[0];
-		const availableCapacity = bestBin.capacity - bestBin.currentQty - bestBin.reservedQty;
+		// Build hierarchical structure: Zones → Racks → Bins
+		const categorized: any[] = [];
+
+		for (const bin of suitableBins) {
+			const zone = bin.rack.zone;
+			const rack = bin.rack;
+			const availableCapacity = bin.capacity - bin.currentQty - bin.reservedQty;
+
+			// Find or create zone
+			let zoneEntry = categorized.find((z) => z.id === zone.id);
+			if (!zoneEntry) {
+				zoneEntry = { id: zone.id, name: zone.name, racks: [] };
+				categorized.push(zoneEntry);
+			}
+
+			// Find or create rack within that zone
+			let rackEntry = zoneEntry.racks.find((r: any) => r.id === rack.id);
+			if (!rackEntry) {
+				rackEntry = { id: rack.id, name: rack.name, bins: [] };
+				zoneEntry.racks.push(rackEntry);
+			}
+
+			// Add bin under that rack
+			rackEntry.bins.push({
+				id: bin.id,
+				name: bin.name,
+				availableCapacity,
+				totalCapacity: bin.capacity,
+				currentQty: bin.currentQty,
+				allowsHazardous: bin.allowsHazardous,
+				isQuarantine: bin.isQuarantine,
+				temperatureControlled: bin.tempMin !== null,
+				temperatureRange: bin.tempMin ? `${bin.tempMin}°C - ${bin.tempMax}°C` : null,
+			});
+		}
+
+		// Pick one best bin (e.g., most available capacity)
+		const allBins = categorized.flatMap((z) => z.racks.flatMap((r: any) => r.bins.map((b: any) => ({ ...b, rackId: r.id, zoneId: z.id }))));
+
+		const bestBin = allBins.sort((a, b) => b.availableCapacity - a.availableCapacity)[0];
+		const bestZone = categorized.find((z) => z.id === bestBin.zoneId);
+		const bestRack = bestZone?.racks.find((r: any) => r.id === bestBin.rackId);
 
 		return {
 			success: true,
-			message: "Location suggestion found",
-			suggestion: {
-				zone: bestBin.rack.zone.name,
-				zoneId: bestBin.rack.zone.id,
-				rack: bestBin.rack.name,
-				rackId: bestBin.rack.id,
-				bin: bestBin.name,
-				binId: bestBin.id,
-				availableCapacity,
-				totalCapacity: bestBin.capacity,
-				currentQty: bestBin.currentQty,
-				attributes: {
-					temperatureControlled: bestBin.tempMin !== null,
-					temperatureRange: bestBin.tempMin ? `${bestBin.tempMin}°C - ${bestBin.tempMax}°C` : null,
-					allowsHazardous: bestBin.allowsHazardous,
-					isQuarantine: bestBin.isQuarantine,
-				},
+			message: "Suitable locations found",
+			suggested: {
+				zone: { id: bestZone.id, name: bestZone.name },
+				rack: { id: bestRack.id, name: bestRack.name },
+				bin: bestBin,
 			},
-			alternativeSuggestions: suitableBins.slice(1, 4).map((bin) => ({
-				zone: bin.rack.zone.name,
-				rack: bin.rack.name,
-				bin: bin.name,
-				availableCapacity: bin.capacity - bin.currentQty - bin.reservedQty,
-			})),
+			categorized, // hierarchical structure for selection
 		};
 	}
 }
