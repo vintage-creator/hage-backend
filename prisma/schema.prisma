@@ -98,6 +98,7 @@ model User {
   transporterShipments  Shipment[]              @relation("TransporterShipments")
   ShipmentStatusHistory ShipmentStatusHistory[]
   Notification          Notification[]
+  inventory      Inventory[] 
 }
 
 model Company {
@@ -258,25 +259,35 @@ model Product {
   isHazardous Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-
-  inventory Inventory[]
 }
 
 model Inventory {
-  id          String   @id @default(cuid())
-  productId   String
-  warehouseId String
-  totalQty    Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String    @id @default(cuid())
+  shipmentId         String
+  warehouseId     String
+  clientName      String?
+  rackId          String?
+  binId           String?
+  status          String?
+  condition       String?
+  specialHandling String?
+  createdBy       String     // ID of user who created the record
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
 
-  product   Product             @relation(fields: [productId], references: [id])
-  warehouse Warehouse           @relation(fields: [warehouseId], references: [id])
-  locations InventoryLocation[]
+  // Relations
+  shipment        Shipment    @relation(fields: [shipmentId], references: [id])
+  warehouse       Warehouse  @relation(fields: [warehouseId], references: [id])
+  user            User       @relation(fields: [createdBy], references: [id])
+  locations       InventoryLocation[]
 
-  @@unique([productId, warehouseId], name: "product_warehouse_unique")
+  @@unique([shipmentId, warehouseId], name: "product_warehouse_unique")
   @@index([warehouseId])
+  @@index([rackId])
+  @@index([binId])
+  @@index([createdBy])
 }
+
 
 model InventoryLocation {
   id          String @id @default(cuid())
@@ -366,6 +377,7 @@ model Shipment {
   customer    User       @relation("CustomerShipments", fields: [customerId], references: [id])
   transporter User?      @relation("TransporterShipments", fields: [assignedTransporterId], references: [id])
   warehouse   Warehouse? @relation("WarehouseShipments", fields: [assignedWarehouseId], references: [id])
+   inventory      Inventory[] 
 
   documents     ShipmentDocument[]
   statusHistory ShipmentStatusHistory[]

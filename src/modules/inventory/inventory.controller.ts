@@ -20,8 +20,9 @@ export class InventoryController {
 
 	@Post()
 	@ApiOperation({ summary: "Create or upsert inventory (product + warehouse)" })
-	async createInventory(@Body() dto: CreateInventoryDto) {
-		return this.svc.createInventory(dto);
+	async createInventory(@Body() dto: CreateInventoryDto, @Req() req: any) {
+		const createdBy = req.user?.id || req.user?.sub;
+		return this.svc.createInventory(dto, createdBy);
 	}
 
 	@Get("product/:productId/warehouse/:warehouseId")
@@ -42,14 +43,14 @@ export class InventoryController {
 		return this.svc.getInventoryOverview(warehouseId);
 	}
 
-	@Get("consolidated")
-	@ApiOperation({
-		summary: "Get consolidated inventory across all warehouses",
-		description: "Aggregates inventory by product across all warehouses, showing total quantities and per-warehouse breakdown",
-	})
-	async getConsolidatedInventory() {
-		return this.svc.getConsolidatedInventory();
-	}
+	// @Get("consolidated")
+	// @ApiOperation({
+	// 	summary: "Get consolidated inventory across all warehouses",
+	// 	description: "Aggregates inventory by product across all warehouses, showing total quantities and per-warehouse breakdown",
+	// })
+	// async getConsolidatedInventory() {
+	// 	return this.svc.getConsolidatedInventory();
+	// }
 
 	// ============================================
 	// INVENTORY LOCATION ENDPOINTS

@@ -13,32 +13,54 @@ export class InventoryService {
 	 * Create or return an Inventory row for product+warehouse.
 	 * If totalQty is provided, set it (in practice this should reflect InventoryLocation sums).
 	 */
-	async createInventory(dto: CreateInventoryDto) {
-		// ensure product and warehouse exist
-		const [product, warehouse] = await Promise.all([this.prisma.product.findUnique({ where: { id: dto.productId } }), this.prisma.warehouse.findUnique({ where: { id: dto.warehouseId } })]);
-		if (!product) throw new NotFoundException("Product not found");
+	async createInventory(dto: CreateInventoryDto, userId: String) {
+		// Validate references
+		const [shipment, warehouse] = await Promise.all([this.prisma.shipment.findUnique({ where: { id: dto.shipmentId } }), this.prisma.warehouse.findUnique({ where: { id: dto.warehouseId } })]);
+
+		if (!shipment) throw new NotFoundException("Shipment not found");
 		if (!warehouse) throw new NotFoundException("Warehouse not found");
 
-		// Manual upsert: avoid reliance on generated compound-unique input name
-		const existing = await this.prisma.inventory.findFirst({
-			where: { productId: dto.productId, warehouseId: dto.warehouseId },
+		// Validate storage structure
+		const [rack, bin] = await Promise.all([this.prisma.rack.findUnique({ where: { id: dto.rackId } }), this.prisma.bin.findUnique({ where: { id: dto.binId } })]);
+
+		if (!rack) throw new NotFoundException("Rack not found");
+		if (!bin) throw new NotFoundException("Bin not found");
+
+		// Check for existing inventory record in same slot
+		const existingInventory = await this.prisma.inventory.findFirst({
+			where: {
+				shipmentId: dto.shipmentId,
+				warehouseId: dto.warehouseId,
+				rackId: dto.rackId,
+				binId: dto.binId,
+			},
 		});
 
-		if (existing) {
-			if (typeof dto.totalQty === "number") {
-				return this.prisma.inventory.update({
-					where: { id: existing.id },
-					data: { totalQty: dto.totalQty },
-				});
-			}
-			return existing;
+		if (existingInventory) {
+			// Update relevant fields if record exists
+			return this.prisma.inventory.update({
+				where: { id: existingInventory.id },
+				data: {
+					condition: dto.condition ?? existingInventory.condition,
+					status: dto.status ?? existingInventory.status,
+					specialHandling: dto.specialHandling ?? existingInventory.specialHandling,
+					updatedAt: new Date(),
+				},
+			});
 		}
 
+		// Create a new inventory record
 		return this.prisma.inventory.create({
 			data: {
-				productId: dto.productId,
+				shipmentId: dto.shipmentId,
 				warehouseId: dto.warehouseId,
-				totalQty: dto.totalQty ?? 0,
+				rackId: dto.rackId,
+				binId: dto.binId,
+				condition: dto.condition,
+				status: dto.status,
+				specialHandling: dto.specialHandling,
+				clientName: dto.clientName,
+				createdBy: userId as string,
 			},
 		});
 	}
@@ -57,7 +79,7 @@ export class InventoryService {
 			}),
 			this.prisma.inventory.findUnique({
 				where: { id: dto.inventoryId },
-				include: { warehouse: true, product: true },
+				include: { warehouse: true },
 			}),
 		]);
 
@@ -85,11 +107,6 @@ export class InventoryService {
 			const updatedBin = await tx.bin.update({
 				where: { id: bin.id },
 				data: { currentQty: { increment: dto.qty } },
-			});
-
-			const updatedInventory = await tx.inventory.update({
-				where: { id: inventory.id },
-				data: { totalQty: { increment: dto.qty } },
 			});
 
 			// Build inv location payload conditionally to satisfy Prisma types
@@ -126,7 +143,7 @@ export class InventoryService {
 				data: invLocData,
 			});
 
-			return { updatedBin, updatedInventory, invLoc };
+			return { updatedBin, invLoc };
 		});
 
 		return result.invLoc;
@@ -221,14 +238,6 @@ export class InventoryService {
 					data: { currentQty: { increment: newQty } },
 				});
 
-				// update inventory.totalQty by qtyDelta (if qty changed)
-				if (qtyDelta !== 0) {
-					await tx.inventory.update({
-						where: { id: loc.inventoryId },
-						data: { totalQty: { increment: qtyDelta } },
-					});
-				}
-
 				// build update payload for inventoryLocation (use Prisma enum casts where needed)
 				const updateData: any = {
 					binId: targetBin.id,
@@ -268,14 +277,6 @@ export class InventoryService {
 					await tx.bin.update({
 						where: { id: sourceBin.id },
 						data: { currentQty: { increment: qtyDelta } },
-					});
-				}
-
-				// update inventory.totalQty
-				if (qtyDelta !== 0) {
-					await tx.inventory.update({
-						where: { id: loc.inventoryId },
-						data: { totalQty: { increment: qtyDelta } },
 					});
 				}
 
@@ -324,12 +325,6 @@ export class InventoryService {
 				data: { currentQty: { decrement: loc.qty } },
 			});
 
-			// decrement inventory.totalQty
-			await tx.inventory.update({
-				where: { id: loc.inventoryId },
-				data: { totalQty: { decrement: loc.qty } },
-			});
-
 			// delete the location
 			await tx.inventoryLocation.delete({ where: { id } });
 
@@ -352,7 +347,6 @@ export class InventoryService {
 				},
 				inventory: {
 					include: {
-						product: true,
 						warehouse: true,
 					},
 				},
@@ -424,7 +418,6 @@ export class InventoryService {
 				},
 				inventory: {
 					include: {
-						product: true,
 						warehouse: true,
 					},
 				},
@@ -436,8 +429,8 @@ export class InventoryService {
 	async getInventory(productId: string, warehouseId: string) {
 		// Use findFirst to avoid relying on generated compound unique field typings
 		return this.prisma.inventory.findFirst({
-			where: { productId, warehouseId },
-			include: { locations: true, product: true },
+			where: { shipmentId: productId, warehouseId },
+			include: { locations: true, shipment: true },
 		});
 	}
 
@@ -454,7 +447,7 @@ export class InventoryService {
 		const inventories = await this.prisma.inventory.findMany({
 			where,
 			include: {
-				product: true,
+				shipment: true,
 				warehouse: true,
 				locations: {
 					include: {
@@ -473,12 +466,9 @@ export class InventoryService {
 		});
 
 		return inventories.map((inv) => ({
-			productId: inv.productId,
-			productName: inv.product.name,
-			productSku: inv.product.sku,
+			productId: inv.shipmentId,
 			warehouseId: inv.warehouseId,
 			warehouseName: inv.warehouse.name,
-			totalQty: inv.totalQty,
 			availableQty: inv.locations.filter((loc) => loc.status === "AVAILABLE").reduce((sum, loc) => sum + loc.qty, 0),
 			reservedQty: inv.locations.filter((loc) => loc.status === "RESERVED").reduce((sum, loc) => sum + loc.qty, 0),
 			quarantineQty: inv.locations.filter((loc) => loc.status === "QUARANTINE").reduce((sum, loc) => sum + loc.qty, 0),
@@ -503,7 +493,7 @@ export class InventoryService {
 				bin: true,
 				inventory: {
 					include: {
-						product: true,
+						shipment: true,
 					},
 				},
 				Company: true,
@@ -549,7 +539,7 @@ export class InventoryService {
 				},
 				inventory: {
 					include: {
-						product: true,
+						shipment: true,
 						warehouse: true,
 					},
 				},
@@ -573,8 +563,6 @@ export class InventoryService {
 			}
 
 			acc[warehouseName][zoneName][rackName][binName].push({
-				productName: loc.inventory.product.name,
-				productSku: loc.inventory.product.sku,
 				qty: loc.qty,
 				status: loc.status,
 				condition: loc.condition,
@@ -595,42 +583,42 @@ export class InventoryService {
 	 * NEW: Get consolidated inventory across all warehouses
 	 * Requirement: "Allow users to view stock per warehouse and consolidate across all warehouses"
 	 */
-	async getConsolidatedInventory() {
-		const inventories = await this.prisma.inventory.findMany({
-			include: {
-				product: true,
-				warehouse: true,
-				locations: true,
-			},
-		});
+	// async getConsolidatedInventory() {
+	// 	const inventories = await this.prisma.inventory.findMany({
+	// 		include: {
+	// 			product: true,
+	// 			warehouse: true,
+	// 			locations: true,
+	// 		},
+	// 	});
 
-		// Group by product and aggregate across warehouses
-		const consolidated = inventories.reduce((acc, inv) => {
-			const productKey = inv.productId;
+	// 	// Group by product and aggregate across warehouses
+	// 	const consolidated = inventories.reduce((acc, inv) => {
+	// 		const productKey = inv.productId;
 
-			if (!acc[productKey]) {
-				acc[productKey] = {
-					productId: inv.productId,
-					productName: inv.product.name,
-					productSku: inv.product.sku,
-					totalQty: 0,
-					warehouses: [],
-				};
-			}
+	// 		if (!acc[productKey]) {
+	// 			acc[productKey] = {
+	// 				productId: inv.productId,
+	// 				productName: inv.product.name,
+	// 				productSku: inv.product.sku,
+	// 				totalQty: 0,
+	// 				warehouses: [],
+	// 			};
+	// 		}
 
-			acc[productKey].totalQty += inv.totalQty;
-			acc[productKey].warehouses.push({
-				warehouseId: inv.warehouseId,
-				warehouseName: inv.warehouse.name,
-				qty: inv.totalQty,
-				locationCount: inv.locations.length,
-			});
+	// 		acc[productKey].totalQty += inv.totalQty;
+	// 		acc[productKey].warehouses.push({
+	// 			warehouseId: inv.warehouseId,
+	// 			warehouseName: inv.warehouse.name,
+	// 			qty: inv.totalQty,
+	// 			locationCount: inv.locations.length,
+	// 		});
 
-			return acc;
-		}, {} as any);
+	// 		return acc;
+	// 	}, {} as any);
 
-		return Object.values(consolidated);
-	}
+	// 	return Object.values(consolidated);
+	// }
 
 	/**
 	 * NEW: Update inventory location status with audit trail
