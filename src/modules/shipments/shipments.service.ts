@@ -243,7 +243,7 @@ export class ShipmentsService {
 					specialHandling: dto.special_handling,
 					itemCompactibility: dto.itemCompactibility,
 				},
-				include: { transporter: true, warehouse: true },
+				include: { transporter: true, warehouse: true, zone: true, rack: true, bin: true },
 			});
 
 			// Log status history

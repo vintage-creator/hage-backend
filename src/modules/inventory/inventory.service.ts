@@ -33,6 +33,7 @@ export class InventoryService {
 				warehouseId: dto.warehouseId,
 				rackId: dto.rackId,
 				binId: dto.binId,
+				zoneId: dto.zoneId,
 			},
 		});
 
@@ -54,6 +55,7 @@ export class InventoryService {
 			data: {
 				shipmentId: dto.shipmentId,
 				warehouseId: dto.warehouseId,
+				zoneId: dto.zoneId,
 				rackId: dto.rackId,
 				binId: dto.binId,
 				condition: dto.condition,
@@ -638,5 +640,65 @@ export class InventoryService {
 				updatedAt: new Date(),
 			},
 		});
+	}
+
+	/**
+	 * Returns: Client Name, Shipment ID, Rack, Bin, Status, Condition, Special Handling, Arrival Date
+	 */
+	async getAllInventoryLocationsFormatted(filter?: {
+		clientName?: string;
+		shipmentId?: string;
+		warehouseId?: string;
+		rackId?: string;
+		binId?: string;
+		status?: string;
+		condition?: string;
+		isHazardous?: boolean;
+		zoneId?: string;
+	}) {
+		const locations = await this.listInventoryLocations(filter);
+
+		return locations.map((loc) => ({
+			id: loc.id,
+			clientName: loc.clientName || "N/A",
+			shipmentId: loc.shipmentId || loc.inventory?.shipmentId || "N/A",
+			rack: loc.bin?.rack?.name || "N/A",
+			bin: loc.bin?.name || "N/A",
+			status: loc.status,
+			condition: loc.condition,
+			specialHandling: this.formatSpecialHandling(loc.specialHandling, loc.isHazardous!, loc.tempMin, loc.tempMax),
+			arrivalDate: loc.createdAt,
+			qty: loc.qty,
+			lotNumber: loc.lotNumber,
+			expiryDate: loc.expiryDate,
+			warehouse: loc.inventory?.warehouse?.name || "N/A",
+			zone: loc.bin?.rack?.zone?.name || "N/A",
+			company: loc.Company?.businessName || null,
+		}));
+	}
+
+	/**
+	 * Helper method to format special handling information
+	 */
+	private formatSpecialHandling(specialHandling: any, isHazardous: boolean, tempMin: number | null, tempMax: number | null): string {
+		const handlers: string[] = [];
+
+		if (isHazardous) {
+			handlers.push("Hazardous");
+		}
+
+		if (tempMin !== null || tempMax !== null) {
+			handlers.push("Temperature");
+		}
+
+		if (specialHandling?.isFragile) {
+			handlers.push("Fragile");
+		}
+
+		if (specialHandling?.requiresRefrigeration) {
+			handlers.push("Refrigeration");
+		}
+
+		return handlers.length > 0 ? handlers.join(", ") : "None";
 	}
 }

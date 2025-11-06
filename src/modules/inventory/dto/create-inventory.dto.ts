@@ -29,6 +29,11 @@ export class CreateInventoryDto {
 	@IsString()
 	binId?: string;
 
+	@ApiPropertyOptional({ description: "Zone ID where the item is stored" })
+	@IsOptional()
+	@IsString()
+	zoneId?: string;
+
 	@ApiPropertyOptional({ description: "Current status of the inventory item", example: "In Storage" })
 	@IsOptional()
 	@IsString()

@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Post, Patch, Delete, Query, UseGuards, Req } from "@nestjs/common";
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam, ApiQuery } from "@nestjs/swagger";
+import { Body, Controller, Get, Param, Post, Patch, Delete, Query, UseGuards, Req, BadRequestException } from "@nestjs/common";
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse } from "@nestjs/swagger";
 import { InventoryService } from "./inventory.service";
 import { CreateInventoryDto } from "./dto/create-inventory.dto";
 import { CreateInventoryLocationDto } from "./dto/create-inventory-location.dto";
@@ -67,49 +67,49 @@ export class InventoryController {
 		return this.svc.createInventoryLocation(dto, createdBy);
 	}
 
-	@Get("locations")
-	@ApiOperation({
-		summary: "List inventory locations with comprehensive filtering",
-		description: "Filter by client, shipment, status, warehouse, bin, rack, zone, condition, and special handling",
-	})
-	@ApiQuery({ name: "clientId", required: false })
-	@ApiQuery({ name: "clientName", required: false })
-	@ApiQuery({ name: "shipmentId", required: false })
-	@ApiQuery({ name: "status", required: false, enum: ["AVAILABLE", "QUARANTINE", "HOLD", "DAMAGED", "RESERVED"] })
-	@ApiQuery({ name: "condition", required: false, enum: ["NEW", "GOOD", "USED", "DAMAGED", "EXPIRED"] })
-	@ApiQuery({ name: "binId", required: false })
-	@ApiQuery({ name: "warehouseId", required: false })
-	@ApiQuery({ name: "rackId", required: false })
-	@ApiQuery({ name: "zoneId", required: false })
-	@ApiQuery({ name: "lotNumber", required: false })
-	@ApiQuery({ name: "isHazardous", required: false, type: Boolean })
-	async listInventoryLocations(
-		@Query("clientId") clientId?: string,
-		@Query("clientName") clientName?: string,
-		@Query("shipmentId") shipmentId?: string,
-		@Query("status") status?: string,
-		@Query("condition") condition?: string,
-		@Query("binId") binId?: string,
-		@Query("warehouseId") warehouseId?: string,
-		@Query("rackId") rackId?: string,
-		@Query("zoneId") zoneId?: string,
-		@Query("lotNumber") lotNumber?: string,
-		@Query("isHazardous") isHazardous?: boolean
-	) {
-		return this.svc.listInventoryLocations({
-			clientId,
-			clientName,
-			shipmentId,
-			status,
-			condition,
-			binId,
-			warehouseId,
-			rackId,
-			zoneId,
-			lotNumber,
-			isHazardous,
-		});
-	}
+	// @Get("locations")
+	// @ApiOperation({
+	// 	summary: "List inventory locations with comprehensive filtering",
+	// 	description: "Filter by client, shipment, status, warehouse, bin, rack, zone, condition, and special handling",
+	// })
+	// @ApiQuery({ name: "clientId", required: false })
+	// @ApiQuery({ name: "clientName", required: false })
+	// @ApiQuery({ name: "shipmentId", required: false })
+	// @ApiQuery({ name: "status", required: false, enum: ["AVAILABLE", "QUARANTINE", "HOLD", "DAMAGED", "RESERVED"] })
+	// @ApiQuery({ name: "condition", required: false, enum: ["NEW", "GOOD", "USED", "DAMAGED", "EXPIRED"] })
+	// @ApiQuery({ name: "binId", required: false })
+	// @ApiQuery({ name: "warehouseId", required: false })
+	// @ApiQuery({ name: "rackId", required: false })
+	// @ApiQuery({ name: "zoneId", required: false })
+	// @ApiQuery({ name: "lotNumber", required: false })
+	// @ApiQuery({ name: "isHazardous", required: false, type: Boolean })
+	// async listInventoryLocations(
+	// 	@Query("clientId") clientId?: string,
+	// 	@Query("clientName") clientName?: string,
+	// 	@Query("shipmentId") shipmentId?: string,
+	// 	@Query("status") status?: string,
+	// 	@Query("condition") condition?: string,
+	// 	@Query("binId") binId?: string,
+	// 	@Query("warehouseId") warehouseId?: string,
+	// 	@Query("rackId") rackId?: string,
+	// 	@Query("zoneId") zoneId?: string,
+	// 	@Query("lotNumber") lotNumber?: string,
+	// 	@Query("isHazardous") isHazardous?: boolean
+	// ) {
+	// 	return this.svc.listInventoryLocations({
+	// 		clientId,
+	// 		clientName,
+	// 		shipmentId,
+	// 		status,
+	// 		condition,
+	// 		binId,
+	// 		warehouseId,
+	// 		rackId,
+	// 		zoneId,
+	// 		lotNumber,
+	// 		isHazardous,
+	// 	});
+	// }
 
 	@Get("locations/:id")
 	@ApiParam({ name: "id", description: "Inventory Location ID" })
@@ -180,5 +180,136 @@ export class InventoryController {
 	@ApiQuery({ name: "rackId", required: false, description: "Filter by rack" })
 	async generateInventoryReport(@Query("warehouseId") warehouseId?: string, @Query("rackId") rackId?: string) {
 		return this.svc.generateInventoryReport(warehouseId, rackId);
+	}
+
+	/**
+	 * GET /inventory/locations/formatted
+	 * Returns all inventory locations formatted for UI display
+	 * Matches the table structure from the image
+	 * @param warehouseId - Required warehouse filter
+	 */
+	@Get("locations")
+	@ApiOperation({
+		summary: "Get formatted inventory locations",
+		description: "Returns all inventory locations formatted for UI display with client name, shipment ID, rack, bin, status, condition, special handling, and arrival date",
+	})
+	@ApiQuery({
+		name: "warehouseId",
+		required: true,
+		type: String,
+		description: "Warehouse ID (required)",
+	})
+	@ApiQuery({
+		name: "clientName",
+		required: false,
+		type: String,
+		description: "Filter by client name (optional)",
+	})
+	@ApiQuery({
+		name: "shipmentId",
+		required: false,
+		type: String,
+		description: "Filter by shipment ID (optional)",
+	})
+	@ApiQuery({
+		name: "rackId",
+		required: false,
+		type: String,
+		description: "Filter by rack ID (optional)",
+	})
+	@ApiQuery({
+		name: "binId",
+		required: false,
+		type: String,
+		description: "Filter by bin ID (optional)",
+	})
+	@ApiQuery({
+		name: "status",
+		required: false,
+		type: String,
+		description: "Filter by status (optional)",
+		enum: ["AVAILABLE", "RESERVED", "QUARANTINE", "DAMAGED", "IN_TRANSIT"],
+	})
+	@ApiQuery({
+		name: "condition",
+		required: false,
+		type: String,
+		description: "Filter by condition (optional)",
+		enum: ["NEW", "GOOD", "FAIR", "DAMAGED", "DEFECTIVE"],
+	})
+	@ApiQuery({
+		name: "isHazardous",
+		required: false,
+		type: Boolean,
+		description: "Filter by hazardous materials (optional)",
+	})
+	@ApiQuery({
+		name: "zoneId",
+		required: false,
+		type: String,
+		description: "Filter by zone ID (optional)",
+	})
+	@ApiResponse({
+		status: 200,
+		description: "Successfully retrieved inventory locations",
+		schema: {
+			type: "array",
+			items: {
+				type: "object",
+				properties: {
+					id: { type: "string" },
+					clientName: { type: "string" },
+					shipmentId: { type: "string" },
+					rack: { type: "string" },
+					bin: { type: "string" },
+					status: { type: "string" },
+					condition: { type: "string" },
+					specialHandling: { type: "string" },
+					arrivalDate: { type: "string", format: "date-time" },
+					qty: { type: "number" },
+					lotNumber: { type: "string", nullable: true },
+					expiryDate: { type: "string", format: "date-time", nullable: true },
+					warehouse: { type: "string" },
+					zone: { type: "string" },
+					company: { type: "string", nullable: true },
+				},
+			},
+		},
+	})
+	@ApiResponse({
+		status: 400,
+		description: "Bad Request - warehouseId is required",
+	})
+	async getAllInventoryLocationsFormatted(
+		@Query("warehouseId") warehouseId: string,
+		@Query("clientName") clientName?: string,
+		@Query("shipmentId") shipmentId?: string,
+		@Query("rackId") rackId?: string,
+		@Query("binId") binId?: string,
+		@Query("status") status?: string,
+		@Query("condition") condition?: string,
+		@Query("isHazardous") isHazardous?: string,
+		@Query("zoneId") zoneId?: string
+	) {
+		// warehouseId is required, throw error if not provided
+		if (!warehouseId) {
+			throw new BadRequestException("warehouseId is required");
+		}
+
+		const filter: any = {
+			warehouseId, // Always include warehouseId
+		};
+
+		// Add optional filters only if provided
+		if (clientName) filter.clientName = clientName;
+		if (shipmentId) filter.shipmentId = shipmentId;
+		if (rackId) filter.rackId = rackId;
+		if (binId) filter.binId = binId;
+		if (status) filter.status = status;
+		if (condition) filter.condition = condition;
+		if (isHazardous !== undefined) filter.isHazardous = isHazardous === "true";
+		if (zoneId) filter.zoneId = zoneId;
+
+		return this.svc.getAllInventoryLocationsFormatted(filter);
 	}
 }

@@ -272,6 +272,7 @@ model Inventory {
   clientName      String?
   rackId          String?
   binId           String?
+  zoneId          String?
   status          String?
   condition       String?
   specialHandling String?
@@ -283,7 +284,7 @@ model Inventory {
   shipment        Shipment    @relation(fields: [shipmentId], references: [id])
   warehouse       Warehouse  @relation(fields: [warehouseId], references: [id])
   user            User       @relation(fields: [createdBy], references: [id])
-  locations       InventoryLocation[]
+  // locations       InventoryLocation[]
 
   @@unique([shipmentId, warehouseId], name: "product_warehouse_unique")
   @@index([warehouseId])
@@ -321,7 +322,7 @@ model InventoryLocation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  inventory Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+ // inventory Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
   bin       Bin       @relation(fields: [binId], references: [id], onDelete: Cascade)
   Company   Company?  @relation(fields: [companyId], references: [id])
   companyId String?
