@@ -301,7 +301,7 @@ export class AuthService {
 
   private signAccessToken(payload: any) {
     const secret = this.cfg.get("JWT_SECRET");
-    const expiresIn = this.cfg.get("JWT_EXPIRES_IN") ?? "15m";
+    const expiresIn = this.cfg.get("JWT_EXPIRES_IN") ?? "30m";
     return this.jwt.sign(payload, { secret, expiresIn });
   }
 
