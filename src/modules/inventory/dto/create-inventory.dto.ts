@@ -10,9 +10,9 @@ export class CreateInventoryDto {
 	@IsString()
 	warehouseId!: string;
 
-	@ApiProperty({ description: "ID of the user who created this inventory record" })
-	@IsString()
-	createdBy!: string;
+	// @ApiProperty({ description: "ID of the user who created this inventory record" })
+	// @IsString()
+	// createdBy!: string;
 
 	@ApiPropertyOptional({ description: "Client name associated with this inventory record" })
 	@IsOptional()

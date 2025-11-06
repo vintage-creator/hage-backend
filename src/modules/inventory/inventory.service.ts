@@ -62,7 +62,6 @@ export class InventoryService {
 				status: dto.status,
 				specialHandling: dto.specialHandling,
 				clientName: dto.clientName,
-				createdBy: userId as string,
 			},
 		});
 	}

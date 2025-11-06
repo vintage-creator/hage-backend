@@ -363,23 +363,39 @@ export class WarehousesService {
     return this.prisma.warehouse.update({ where: { id }, data });
   }
 
-  async deleteWarehouse(id: string) {
-    const zoneCount = await this.prisma.zone.count({
-      where: { warehouseId: id },
-    });
-    const inventoryCount = await this.prisma.inventory.count({
-      where: { warehouseId: id },
-    });
+  async deleteWarehouse(id: string, force = false) {
+	const zoneCount = await this.prisma.zone.count({ where: { warehouseId: id } });
+	const inventoryCount = await this.prisma.inventory.count({ where: { warehouseId: id } });
+  
+	if ((zoneCount > 0 || inventoryCount > 0) && !force) {
+	  throw new BadRequestException(
+		"Cannot delete warehouse that still has zones or inventory. Please remove zones/inventory first."
+	  );
+	}
+  
+	if (!force) {
+	  await this.prisma.warehouse.delete({ where: { id } });
+	  return { ok: true };
+	}
+  
+	// FORCE delete — run in transaction
+	return this.prisma.$transaction(async (tx) => {
+	  const invs = await tx.inventory.findMany({ where: { warehouseId: id }, select: { id: true } });
+	  const invIds = invs.map(i => i.id);
+  
+	  if (invIds.length) {
+		await tx.inventoryLocation.deleteMany({ where: { inventoryId: { in: invIds } }});
+		await tx.inventory.deleteMany({ where: { id: { in: invIds } }});
+	  }
 
-    if (zoneCount > 0 || inventoryCount > 0) {
-      throw new BadRequestException(
-        "Cannot delete warehouse that still has zones or inventory. Please remove zones/inventory first."
-      );
-    }
+	  await tx.zone.deleteMany({ where: { warehouseId: id }});
 
-    await this.prisma.warehouse.delete({ where: { id } });
-    return { ok: true };
+	  await tx.warehouse.delete({ where: { id }});
+  
+	  return { ok: true };
+	});
   }
+  
 
   async createZone(warehouseId: string, dto: CreateZoneDto) {
     const wh = await this.prisma.warehouse.findUnique({
