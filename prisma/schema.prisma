@@ -177,6 +177,7 @@ model Warehouse {
   numRacks       Int?
   numBinsPerRack Int?
 
+  allowsNone        Boolean @default(false) 
   allowsTemperature Boolean @default(false)
   allowsHazardous   Boolean @default(false)
   allowsQuarantine  Boolean @default(false)

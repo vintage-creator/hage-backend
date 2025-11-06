@@ -82,4 +82,9 @@ export class CreateWarehouseDto {
   @IsOptional()
   @IsBoolean()
   allowsQuarantine?: boolean;
+
+  @ApiPropertyOptional({ example: true, description: 'Warehouse has no special condition' })
+  @IsOptional()
+  @IsBoolean()
+  allowsNone?: boolean;
 }
