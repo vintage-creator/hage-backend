@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Patch, Delete, Query, UseGuards, Request, UnauthorizedException, ParseIntPipe, DefaultValuePipe, ValidationPipe, UsePipes } from "@nestjs/common";
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags, ApiParam, ApiBody } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags, ApiParam, ApiBody, ApiQuery } from "@nestjs/swagger";
 import { WarehousesService } from "./warehouses.service";
 import { CreateWarehouseDto } from "./dto/create-warehouse.dto";
 import { CreateZoneDto } from "./dto/create-zone.dto";
@@ -108,5 +108,18 @@ export class WarehousesController {
 	@ApiOperation({ summary: "Get suggested Location" })
 	async suggestedLocation(@Param("id") id: string): Promise<any> {
 		return this.svc.suggestLocation(id);
+	}
+
+	@Get(":id/racks")
+	@ApiOperation({ summary: "List racks for a warehouse" })
+	@ApiQuery({ name: "search", required: false, type: String, description: "Search by rack or zone name" })
+	@ApiQuery({ name: "page", required: false, type: Number, description: "Page number (default: 1)" })
+	@ApiQuery({ name: "perPage", required: false, type: Number, description: "Results per page (default: 20)" })
+	async getRacks(@Param("id") warehouseId: string, @Query("search") search?: string, @Query("page") page?: string, @Query("perPage") perPage?: string) {
+		return this.svc.getRacksForWarehouse(warehouseId, {
+			search,
+			page: page ? Number(page) : 1,
+			perPage: perPage ? Number(perPage) : 20,
+		});
 	}
 }

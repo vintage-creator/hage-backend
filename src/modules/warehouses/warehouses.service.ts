@@ -14,30 +14,15 @@ export class WarehousesService {
 	/**
 	 * Auto-generate warehouse structure (Zones, Racks, Bins) based on provided counts
 	 */
-	private async generateWarehouseStructure(warehouseId: string, warehouse: any, numZones: number, numRacks: number, numBinsPerRack: number) {
-		// Standard zone types based on requirements
+	private async generateWarehouseStructure(warehouseId: string, warehouse: any, numZones: number, numRows: number, numRacks: number, numBinsPerRack: number) {
 		const standardZoneTypes = ["Zone A", "Zone B", "Zone C", "Zone D", "Zone E", "Zone F"];
-
 		const zones: any[] = [];
 
-		// Calculate capacity distribution
 		const capacityPerZone = Math.floor(warehouse.totalCapacity / numZones);
 
-		// Generate zones
+		// === Generate Zones ===
 		for (let i = 0; i < numZones; i++) {
-			let zoneName: string;
-
-			zoneName = standardZoneTypes[i];
-
-			// // Use standard zone types first, then alphabetic naming
-			// if (i < standardZoneTypes.length) {
-			// 	zoneName = standardZoneTypes[i];
-			// } else {
-			// 	// Use alphabetic naming: Zone A, Zone B, Zone C, etc.
-			// 	zoneName = `Zone ${String.fromCharCode(65 + (i - standardZoneTypes.length))}`;
-			// }
-
-			// Determine if this is a special zone
+			const zoneName = standardZoneTypes[i] || `Zone ${String.fromCharCode(65 + i)}`;
 			const isLastZone = i === numZones - 1;
 			const isQuarantineZone = isLastZone && warehouse.allowsQuarantine;
 
@@ -56,45 +41,53 @@ export class WarehousesService {
 			zones.push(zone);
 		}
 
-		// Distribute racks evenly across zones
+		// === Virtual Rows ===
 		const racksPerZone = Math.ceil(numRacks / numZones);
+		const racksPerRow = Math.ceil(racksPerZone / numRows);
+
 		let globalRackCounter = 1;
 
 		for (const zone of zones) {
-			const racksForThisZone = Math.min(racksPerZone, numRacks - (globalRackCounter - 1));
+			const capacityPerRack = Math.floor(zone.capacity / racksPerZone);
+			const zoneLetter = zone.name.replace("Zone ", ""); // e.g. "Zone A" → "A"
 
-			const capacityPerRack = zone.capacity ? Math.floor(zone.capacity / racksForThisZone) : null;
+			let rackCounterForZone = 1; // reset for each zone
 
-			// Generate racks for this zone
-			for (let r = 0; r < racksForThisZone; r++) {
-				const rackName = `Rack A${globalRackCounter}`;
-				globalRackCounter++;
+			for (let rowIndex = 1; rowIndex <= numRows; rowIndex++) {
+				for (let r = 0; r < racksPerRow && rackCounterForZone <= racksPerZone; r++) {
+					const rackName = `Rack ${zoneLetter}${rackCounterForZone}`; // e.g. Rack A1, Rack A2, etc.
 
-				const rack = await this.prisma.rack.create({
-					data: {
-						zoneId: zone.id,
-						name: rackName,
-						capacity: capacityPerRack,
-					},
-				});
-
-				// Generate bins for this rack
-				const capacityPerBin = rack.capacity ? Math.floor(rack.capacity / numBinsPerRack) : Math.floor(warehouse.totalCapacity / (numRacks * numBinsPerRack));
-
-				for (let b = 1; b <= numBinsPerRack; b++) {
-					const binName = `Bin 00${b}`;
-
-					await this.prisma.bin.create({
+					const rack = await this.prisma.rack.create({
 						data: {
-							rackId: rack.id,
-							name: binName,
-							capacity: capacityPerBin,
-							tempMin: zone.tempMin,
-							tempMax: zone.tempMax,
-							allowsHazardous: zone.allowsHazardous,
-							isQuarantine: zone.isQuarantineZone,
+							zoneId: zone.id,
+							name: rackName,
+							capacity: capacityPerRack,
 						},
 					});
+
+					// Generate bins under each rack
+					const capacityPerBin = Math.floor(rack.capacity! / numBinsPerRack);
+
+					for (let b = 1; b <= numBinsPerRack; b++) {
+						const binName = `Bin ${String(b).padStart(3, "0")}`;
+
+						const locationCode = `${zoneLetter}-R${rowIndex}-${rackName.replace("Rack ", "R")}-B${String(b).padStart(3, "0")}`; // e.g. A-R1-RA1-B001
+
+						await this.prisma.bin.create({
+							data: {
+								rackId: rack.id,
+								name: binName,
+								capacity: capacityPerBin,
+								tempMin: zone.tempMin,
+								tempMax: zone.tempMax,
+								allowsHazardous: zone.allowsHazardous,
+								isQuarantine: zone.isQuarantineZone,
+							},
+						});
+					}
+
+					rackCounterForZone++;
+					globalRackCounter++;
 				}
 			}
 		}
@@ -169,7 +162,7 @@ export class WarehousesService {
 		let structureGenerated = null;
 		if (dto.numZones && dto.numRacks && dto.numBinsPerRack && dto.numZones > 0 && dto.numRacks > 0 && dto.numBinsPerRack > 0) {
 			try {
-				structureGenerated = await this.generateWarehouseStructure(warehouse.id, warehouse, dto.numZones, dto.numRacks, dto.numBinsPerRack);
+				structureGenerated = await this.generateWarehouseStructure(warehouse.id, warehouse, dto.numZones, dto.numRows!, dto.numRacks, dto.numBinsPerRack);
 			} catch (error) {
 				// If structure generation fails, log error but don't fail warehouse creation
 				console.error("Failed to generate warehouse structure:", error);
@@ -544,6 +537,71 @@ export class WarehousesService {
 				bin: bestBin,
 			},
 			categorized, // hierarchical structure for selection
+		};
+	}
+
+	async getRacksForWarehouse(warehouseId: string, query: { search?: string; page?: number; perPage?: number } = {}) {
+		const { search, page = 1, perPage = 20 } = query;
+
+		// Validate warehouse exists
+		const warehouse = await this.prisma.warehouse.findUnique({
+			where: { id: warehouseId },
+			select: { id: true, name: true, country: true, city: true, address: true },
+		});
+		if (!warehouse) throw new NotFoundException("Warehouse not found");
+
+		// Filter by search term (rack name or location)
+		const where: any = {
+			zone: { warehouseId },
+		};
+		if (search) {
+			where.OR = [{ name: { contains: search, mode: "insensitive" } }, { zone: { name: { contains: search, mode: "insensitive" } } }];
+		}
+
+		// Count total racks
+		const total = await this.prisma.rack.count({ where });
+
+		// Fetch paginated racks with their zone and bins
+		const racks = await this.prisma.rack.findMany({
+			where,
+			include: {
+				zone: { select: { name: true } },
+				bins: { select: { currentQty: true } },
+			},
+			orderBy: { name: "asc" },
+			skip: (page - 1) * perPage,
+			take: perPage,
+		});
+
+		// Format each rack card
+		const items = racks.map((rack) => {
+			const totalStock = rack.bins.reduce((sum, b) => sum + (b.currentQty || 0), 0);
+			const capacity = rack.capacity ?? 0;
+
+			return {
+				id: rack.id,
+				name: rack.name, // e.g. Rack A4
+				zone: rack.zone?.name ?? "N/A",
+				capacity,
+				currentStock: totalStock,
+				location: `${warehouse.city}, ${warehouse.country}`,
+			};
+		});
+
+		return {
+			ok: true,
+			warehouse: {
+				id: warehouse.id,
+				name: warehouse.name,
+				location: `${warehouse.city}, ${warehouse.country}`,
+			},
+			items,
+			meta: {
+				page,
+				perPage,
+				total,
+				totalPages: Math.ceil(total / perPage),
+			},
 		};
 	}
 }

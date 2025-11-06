@@ -1,6 +1,6 @@
 // src/shipments/dto/assign-shipment.dto.ts
 import { ApiPropertyOptional } from "@nestjs/swagger";
-import { IsOptional, IsString, IsUUID } from "class-validator";
+import { IsBoolean, IsOptional, IsString } from "class-validator";
 
 export class AssignShipmentDto {
 	@ApiPropertyOptional({
@@ -19,18 +19,36 @@ export class AssignShipmentDto {
 	@IsString()
 	warehouseId?: string;
 
-	@ApiPropertyOptional({ description: "Zone ID selected for manual assignment", example: "user_transporter_id_123" })
+	@ApiPropertyOptional({ description: "Zone ID selected for manual assignment", example: "zone_id_123" })
 	@IsOptional()
 	@IsString()
 	zoneId?: string;
 
-	@ApiPropertyOptional({ description: "Rack ID within the selected zone", example: "user_transporter_id_123" })
+	@ApiPropertyOptional({ description: "Rack ID within the selected zone", example: "rack_id_123" })
 	@IsOptional()
 	@IsString()
 	rackId?: string;
 
-	@ApiPropertyOptional({ description: "Bin ID within the selected rack", example: "user_transporter_id_123" })
+	@ApiPropertyOptional({ description: "Bin ID within the selected rack", example: "bin_id_123" })
 	@IsOptional()
 	@IsString()
 	binId?: string;
+
+	// 🧊 Bin Attributes
+	@ApiPropertyOptional({
+		description: "Special Handling",
+		example: "Ambient",
+		enum: ["Ambient", "Chilled", "Frozen"],
+	})
+	@IsOptional()
+	@IsString()
+	special_handling?: string;
+
+	@ApiPropertyOptional({
+		description: "Item compactibility or category (e.g., General goods, Fragile, Hazardous)",
+		example: "General goods",
+	})
+	@IsOptional()
+	@IsString()
+	itemCompactibility?: string;
 }

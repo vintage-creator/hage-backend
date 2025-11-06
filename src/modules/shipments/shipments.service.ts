@@ -240,6 +240,8 @@ export class ShipmentsService {
 					assignedZoneId: assignedLocation?.zoneId || null,
 					assignedRackId: assignedLocation?.rackId || null,
 					assignedBinId: assignedLocation?.binId || null,
+					specialHandling: dto.special_handling,
+					itemCompactibility: dto.itemCompactibility,
 				},
 				include: { transporter: true, warehouse: true },
 			});

@@ -346,6 +346,8 @@ model Shipment {
   tons                 Float
   weight               Float
   handlingInstructions String?
+  specialHandling String?
+  itemCompactibility String?
 
   // ORIGIN & DESTINATION (JSON format)
   origin      Json // {country, region, state, lga, address}
