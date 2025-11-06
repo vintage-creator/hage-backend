@@ -59,7 +59,6 @@ enum ShipmentStatus {
   CANCELLED
 }
 
-
 enum DocumentType {
   COMMERCIAL_INVOICE
   PACKING_LIST
@@ -98,7 +97,7 @@ model User {
   transporterShipments  Shipment[]              @relation("TransporterShipments")
   ShipmentStatusHistory ShipmentStatusHistory[]
   Notification          Notification[]
-  inventory      Inventory[] 
+  inventory             Inventory[]
 }
 
 model Company {
@@ -177,7 +176,7 @@ model Warehouse {
   numRacks       Int?
   numBinsPerRack Int?
 
-  allowsNone        Boolean @default(false) 
+  allowsNone        Boolean @default(false)
   allowsTemperature Boolean @default(false)
   allowsHazardous   Boolean @default(false)
   allowsQuarantine  Boolean @default(false)
@@ -206,7 +205,7 @@ model Zone {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  warehouse Warehouse  @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
   racks     Rack[]
   shipments Shipment[]
 
@@ -221,8 +220,8 @@ model Rack {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  zone Zone  @relation(fields: [zoneId], references: [id], onDelete: Cascade)
-  bins Bin[]
+  zone      Zone       @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  bins      Bin[]
   shipments Shipment[]
 
   @@index([zoneId])
@@ -244,7 +243,7 @@ model Bin {
 
   rack               Rack                @relation(fields: [rackId], references: [id], onDelete: Cascade)
   InventoryLocations InventoryLocation[]
-  shipments Shipment[]
+  shipments          Shipment[]
 
   @@index([rackId])
   @@index([currentQty, reservedQty])
@@ -266,8 +265,8 @@ model Product {
 }
 
 model Inventory {
-  id              String    @id @default(cuid())
-  shipmentId         String
+  id              String   @id @default(cuid())
+  shipmentId      String
   warehouseId     String
   clientName      String?
   rackId          String?
@@ -276,15 +275,15 @@ model Inventory {
   status          String?
   condition       String?
   specialHandling String?
-  createdBy       String     // ID of user who created the record
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  createdBy       String // ID of user who created the record
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   // Relations
-  shipment        Shipment    @relation(fields: [shipmentId], references: [id])
-  warehouse       Warehouse  @relation(fields: [warehouseId], references: [id])
-  user            User       @relation(fields: [createdBy], references: [id])
-  // locations       InventoryLocation[]
+  shipment  Shipment            @relation(fields: [shipmentId], references: [id])
+  warehouse Warehouse           @relation(fields: [warehouseId], references: [id])
+  user      User                @relation(fields: [createdBy], references: [id])
+  locations InventoryLocation[]
 
   @@unique([shipmentId, warehouseId], name: "product_warehouse_unique")
   @@index([warehouseId])
@@ -292,7 +291,6 @@ model Inventory {
   @@index([binId])
   @@index([createdBy])
 }
-
 
 model InventoryLocation {
   id          String @id @default(cuid())
@@ -322,7 +320,7 @@ model InventoryLocation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
- // inventory Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  inventory Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
   bin       Bin       @relation(fields: [binId], references: [id], onDelete: Cascade)
   Company   Company?  @relation(fields: [companyId], references: [id])
   companyId String?
@@ -348,8 +346,8 @@ model Shipment {
   tons                 Float
   weight               Float
   handlingInstructions String?
-  specialHandling String?
-  itemCompactibility String?
+  specialHandling      String?
+  itemCompactibility   String?
 
   // ORIGIN & DESTINATION (JSON format)
   origin      Json // {country, region, state, lga, address}
@@ -393,10 +391,10 @@ model Shipment {
   rack Rack? @relation(fields: [assignedRackId], references: [id])
   bin  Bin?  @relation(fields: [assignedBinId], references: [id])
 
-  inventory      Inventory[]
-  documents      ShipmentDocument[]
-  statusHistory  ShipmentStatusHistory[]
-  events         TrackingEvent[]
+  inventory     Inventory[]
+  documents     ShipmentDocument[]
+  statusHistory ShipmentStatusHistory[]
+  events        TrackingEvent[]
 
   @@index([orderId])
   @@index([status])
