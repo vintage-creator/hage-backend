@@ -149,6 +149,7 @@ export class WarehousesService {
 			allowsTemperature: dto.allowsTemperature ?? false,
 			allowsHazardous: dto.allowsHazardous ?? false,
 			allowsQuarantine: dto.allowsQuarantine ?? false,
+      allowsNone: dto.allowsNone ?? false,
 		};
 
 		if (dto.numZones !== undefined) data.numZones = dto.numZones;
@@ -293,6 +294,7 @@ export class WarehousesService {
 			allowsTemperature: dto.allowsTemperature ?? undefined,
 			allowsHazardous: dto.allowsHazardous ?? undefined,
 			allowsQuarantine: dto.allowsQuarantine ?? undefined,
+      allowsNone: dto.allowsNone ?? undefined,
 		};
 
 		Object.keys(data).forEach((k) => data[k] === undefined && delete data[k]);
