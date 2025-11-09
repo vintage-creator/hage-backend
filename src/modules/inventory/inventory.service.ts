@@ -637,49 +637,58 @@ export class InventoryService {
 			throw new Error("warehouseId is required");
 		}
 
-		const locations = await this.prisma.inventoryLocation.findMany({
-			where: {
-				inventory: {
-					warehouseId: warehouseId,
-				},
-			},
+		const inventories = await this.prisma.inventory.findMany({
+			where: { warehouseId },
 			orderBy: { createdAt: "desc" },
 			include: {
-				bin: {
-					include: {
-						rack: {
-							include: {
-								zone: true,
-							},
-						},
-					},
-				},
-				inventory: {
-					include: {
-						warehouse: true,
-					},
-				},
-				Company: true,
+				warehouse: true,
 			},
 		});
 
-		return locations.map((loc) => ({
-			id: loc.id,
-			clientName: loc.clientName || "N/A",
-			shipmentId: loc.shipmentId || loc.inventory?.shipmentId || "N/A",
-			rack: loc.bin?.rack?.name || "N/A",
-			bin: loc.bin?.name || "N/A",
-			status: loc.status,
-			condition: loc.condition,
-			specialHandling: this.formatSpecialHandling(loc.specialHandling, loc.isHazardous!, loc.tempMin, loc.tempMax),
-			arrivalDate: loc.createdAt,
-			qty: loc.qty,
-			lotNumber: loc.lotNumber,
-			expiryDate: loc.expiryDate,
-			warehouse: loc.inventory?.warehouse?.name || "N/A",
-			zone: loc.bin?.rack?.zone?.name || "N/A",
-			company: loc.Company?.businessName || null,
-		}));
+		return await Promise.all(
+			inventories.map(async (inv) => {
+				// 🔹 Safe parse for specialHandling
+				let specialHandlingParsed: any = null;
+				if (inv.specialHandling) {
+					try {
+						specialHandlingParsed = typeof inv.specialHandling === "string" && inv.specialHandling.trim().startsWith("{") ? JSON.parse(inv.specialHandling) : inv.specialHandling;
+					} catch {
+						specialHandlingParsed = inv.specialHandling;
+					}
+				}
+
+				// 🔹 Fetch Rack and Bin names if IDs exist
+				let rackName = "N/A";
+				let binName = "N/A";
+
+				if (inv.rackId) {
+					const rack = await this.prisma.rack.findUnique({
+						where: { id: inv.rackId },
+						select: { name: true },
+					});
+					rackName = rack?.name || "N/A";
+				}
+
+				if (inv.binId) {
+					const bin = await this.prisma.bin.findUnique({
+						where: { id: inv.binId },
+						select: { name: true },
+					});
+					binName = bin?.name || "N/A";
+				}
+
+				return {
+					clientName: inv.clientName || "N/A",
+					shipmentId: inv.shipmentId || "N/A",
+					rack: rackName,
+					bin: binName,
+					status: inv.status || "N/A",
+					condition: inv.condition || "N/A",
+					specialHandling: specialHandlingParsed,
+					arrivalDate: inv.createdAt.toISOString().split("T")[0],
+				};
+			})
+		);
 	}
 
 	/**
@@ -688,21 +697,10 @@ export class InventoryService {
 	private formatSpecialHandling(specialHandling: any, isHazardous: boolean, tempMin: number | null, tempMax: number | null): string {
 		const handlers: string[] = [];
 
-		if (isHazardous) {
-			handlers.push("Hazardous");
-		}
-
-		if (tempMin !== null || tempMax !== null) {
-			handlers.push("Temperature");
-		}
-
-		if (specialHandling?.isFragile) {
-			handlers.push("Fragile");
-		}
-
-		if (specialHandling?.requiresRefrigeration) {
-			handlers.push("Refrigeration");
-		}
+		if (isHazardous) handlers.push("Hazardous");
+		if (tempMin !== null || tempMax !== null) handlers.push("Temperature");
+		if (specialHandling?.isFragile) handlers.push("Fragile");
+		if (specialHandling?.requiresRefrigeration) handlers.push("Refrigeration");
 
 		return handlers.length > 0 ? handlers.join(", ") : "None";
 	}

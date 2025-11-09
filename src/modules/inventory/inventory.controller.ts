@@ -188,7 +188,7 @@ export class InventoryController {
 	 * Matches the table structure from the image
 	 * @param warehouseId - Required warehouse filter
 	 */
-	@Get("locations/warehouse")
+	@Get("locations")
 	@ApiOperation({
 		summary: "Get all inventory locations by warehouse",
 		description: "Returns all inventory locations belonging to a specific warehouse ID only",
@@ -211,6 +211,8 @@ export class InventoryController {
 		if (!warehouseId) {
 			throw new BadRequestException("warehouseId is required");
 		}
+
+		console.log(warehouseId);
 
 		return this.svc.getInventoryByWarehouseFormatted(warehouseId);
 	}
