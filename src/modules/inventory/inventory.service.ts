@@ -360,19 +360,7 @@ export class InventoryService {
 	/**
 	 * Enhanced list with comprehensive filtering per MVP requirements
 	 */
-	async listInventoryLocations(filter?: {
-		clientId?: string;
-		clientName?: string;
-		shipmentId?: string;
-		status?: string;
-		binId?: string;
-		warehouseId?: string;
-		condition?: string;
-		lotNumber?: string;
-		isHazardous?: boolean;
-		rackId?: string;
-		zoneId?: string;
-	}) {
+	async listInventoryLocations(filter?: { clientId?: string; clientName?: string; shipmentId?: string; status?: string; binId?: string; warehouseId?: string; condition?: string; lotNumber?: string; isHazardous?: boolean; rackId?: string; zoneId?: string }) {
 		const where: any = {};
 
 		if (filter?.clientId) where.clientId = filter.clientId;
@@ -644,18 +632,36 @@ export class InventoryService {
 	/**
 	 * Returns: Client Name, Shipment ID, Rack, Bin, Status, Condition, Special Handling, Arrival Date
 	 */
-	async getAllInventoryLocationsFormatted(filter?: {
-		clientName?: string;
-		shipmentId?: string;
-		warehouseId?: string;
-		rackId?: string;
-		binId?: string;
-		status?: string;
-		condition?: string;
-		isHazardous?: boolean;
-		zoneId?: string;
-	}) {
-		const locations = await this.listInventoryLocations(filter);
+	async getInventoryByWarehouseFormatted(warehouseId: string) {
+		if (!warehouseId) {
+			throw new Error("warehouseId is required");
+		}
+
+		const locations = await this.prisma.inventoryLocation.findMany({
+			where: {
+				inventory: {
+					warehouseId: warehouseId,
+				},
+			},
+			orderBy: { createdAt: "desc" },
+			include: {
+				bin: {
+					include: {
+						rack: {
+							include: {
+								zone: true,
+							},
+						},
+					},
+				},
+				inventory: {
+					include: {
+						warehouse: true,
+					},
+				},
+				Company: true,
+			},
+		});
 
 		return locations.map((loc) => ({
 			id: loc.id,

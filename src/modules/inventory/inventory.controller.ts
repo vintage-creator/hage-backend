@@ -188,10 +188,10 @@ export class InventoryController {
 	 * Matches the table structure from the image
 	 * @param warehouseId - Required warehouse filter
 	 */
-	@Get("locations")
+	@Get("locations/warehouse")
 	@ApiOperation({
-		summary: "Get formatted inventory locations",
-		description: "Returns all inventory locations formatted for UI display with client name, shipment ID, rack, bin, status, condition, special handling, and arrival date",
+		summary: "Get all inventory locations by warehouse",
+		description: "Returns all inventory locations belonging to a specific warehouse ID only",
 	})
 	@ApiQuery({
 		name: "warehouseId",
@@ -199,117 +199,19 @@ export class InventoryController {
 		type: String,
 		description: "Warehouse ID (required)",
 	})
-	@ApiQuery({
-		name: "clientName",
-		required: false,
-		type: String,
-		description: "Filter by client name (optional)",
-	})
-	@ApiQuery({
-		name: "shipmentId",
-		required: false,
-		type: String,
-		description: "Filter by shipment ID (optional)",
-	})
-	@ApiQuery({
-		name: "rackId",
-		required: false,
-		type: String,
-		description: "Filter by rack ID (optional)",
-	})
-	@ApiQuery({
-		name: "binId",
-		required: false,
-		type: String,
-		description: "Filter by bin ID (optional)",
-	})
-	@ApiQuery({
-		name: "status",
-		required: false,
-		type: String,
-		description: "Filter by status (optional)",
-		enum: ["AVAILABLE", "RESERVED", "QUARANTINE", "DAMAGED", "IN_TRANSIT"],
-	})
-	@ApiQuery({
-		name: "condition",
-		required: false,
-		type: String,
-		description: "Filter by condition (optional)",
-		enum: ["NEW", "GOOD", "FAIR", "DAMAGED", "DEFECTIVE"],
-	})
-	@ApiQuery({
-		name: "isHazardous",
-		required: false,
-		type: Boolean,
-		description: "Filter by hazardous materials (optional)",
-	})
-	@ApiQuery({
-		name: "zoneId",
-		required: false,
-		type: String,
-		description: "Filter by zone ID (optional)",
-	})
 	@ApiResponse({
 		status: 200,
-		description: "Successfully retrieved inventory locations",
-		schema: {
-			type: "array",
-			items: {
-				type: "object",
-				properties: {
-					id: { type: "string" },
-					clientName: { type: "string" },
-					shipmentId: { type: "string" },
-					rack: { type: "string" },
-					bin: { type: "string" },
-					status: { type: "string" },
-					condition: { type: "string" },
-					specialHandling: { type: "string" },
-					arrivalDate: { type: "string", format: "date-time" },
-					qty: { type: "number" },
-					lotNumber: { type: "string", nullable: true },
-					expiryDate: { type: "string", format: "date-time", nullable: true },
-					warehouse: { type: "string" },
-					zone: { type: "string" },
-					company: { type: "string", nullable: true },
-				},
-			},
-		},
+		description: "Successfully retrieved inventory locations for warehouse",
 	})
 	@ApiResponse({
 		status: 400,
 		description: "Bad Request - warehouseId is required",
 	})
-	async getAllInventoryLocationsFormatted(
-		@Query("warehouseId") warehouseId: string,
-		@Query("clientName") clientName?: string,
-		@Query("shipmentId") shipmentId?: string,
-		@Query("rackId") rackId?: string,
-		@Query("binId") binId?: string,
-		@Query("status") status?: string,
-		@Query("condition") condition?: string,
-		@Query("isHazardous") isHazardous?: string,
-		@Query("zoneId") zoneId?: string
-	) {
-		// warehouseId is required, throw error if not provided
+	async getInventoryByWarehouse(@Query("warehouseId") warehouseId: string) {
 		if (!warehouseId) {
 			throw new BadRequestException("warehouseId is required");
 		}
 
-		const filter: any = {
-			warehouseId, // Always include warehouseId
-		};
-
-		// Add optional filters only if provided
-		if (clientName) filter.clientName = clientName;
-		if (shipmentId) filter.shipmentId = shipmentId;
-		if (rackId) filter.rackId = rackId;
-		if (binId) filter.binId = binId;
-		if (status) filter.status = status;
-		if (condition) filter.condition = condition;
-		if (isHazardous !== undefined) filter.isHazardous = isHazardous === "true";
-		if (zoneId) filter.zoneId = zoneId;
-
-		return this.svc.getAllInventoryLocationsFormatted(filter);
+		return this.svc.getInventoryByWarehouseFormatted(warehouseId);
 	}
 }
