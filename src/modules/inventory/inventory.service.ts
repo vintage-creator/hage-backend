@@ -15,7 +15,7 @@ export class InventoryService {
 	 */
 	async createInventory(dto: CreateInventoryDto, userId: String) {
 		// Validate references
-		const [shipment, warehouse] = await Promise.all([this.prisma.shipment.findUnique({ where: { id: dto.shipmentId } }), this.prisma.warehouse.findUnique({ where: { id: dto.warehouseId } })]);
+		const [shipment, warehouse] = await Promise.all([this.prisma.shipment.findUnique({ where: { orderId: dto.shipmentId } }), this.prisma.warehouse.findUnique({ where: { id: dto.warehouseId } })]);
 
 		if (!shipment) throw new NotFoundException("Shipment not found");
 		if (!warehouse) throw new NotFoundException("Warehouse not found");
