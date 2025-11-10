@@ -33,15 +33,15 @@ export class InventoryController {
 		return this.svc.getInventory(productId, warehouseId);
 	}
 
-	@Get("overview")
-	@ApiOperation({
-		summary: "Get inventory overview with real-time stock levels per warehouse",
-		description: "Returns aggregated inventory data showing available, reserved, quarantine, and damaged quantities. Can be filtered by warehouse.",
-	})
-	@ApiQuery({ name: "warehouseId", required: false, description: "Filter by specific warehouse" })
-	async getInventoryOverview(@Query("warehouseId") warehouseId?: string) {
-		return this.svc.getInventoryOverview(warehouseId);
-	}
+	// @Get("overview")
+	// @ApiOperation({
+	// 	summary: "Get inventory overview with real-time stock levels per warehouse",
+	// 	description: "Returns aggregated inventory data showing available, reserved, quarantine, and damaged quantities. Can be filtered by warehouse.",
+	// })
+	// @ApiQuery({ name: "warehouseId", required: false, description: "Filter by specific warehouse" })
+	// async getInventoryOverview(@Query("warehouseId") warehouseId?: string) {
+	// 	return this.svc.getInventoryOverview(warehouseId);
+	// }
 
 	// @Get("consolidated")
 	// @ApiOperation({
@@ -157,30 +157,30 @@ export class InventoryController {
 	// RACK-LEVEL TRACKING ENDPOINTS
 	// ============================================
 
-	@Get("rack/:rackId")
-	@ApiParam({ name: "rackId", description: "Rack ID" })
-	@ApiOperation({
-		summary: "Get all inventory in a specific rack",
-		description: "Track inventory levels at the rack level as required by MVP",
-	})
-	async getInventoryByRack(@Param("rackId") rackId: string) {
-		return this.svc.getInventoryByRack(rackId);
-	}
+	// @Get("rack/:rackId")
+	// @ApiParam({ name: "rackId", description: "Rack ID" })
+	// @ApiOperation({
+	// 	summary: "Get all inventory in a specific rack",
+	// 	description: "Track inventory levels at the rack level as required by MVP",
+	// })
+	// async getInventoryByRack(@Param("rackId") rackId: string) {
+	// 	return this.svc.getInventoryByRack(rackId);
+	// }
 
 	// ============================================
 	// REPORTING ENDPOINTS
 	// ============================================
 
-	@Get("reports/inventory")
-	@ApiOperation({
-		summary: "Generate comprehensive inventory status report",
-		description: "Hierarchical report organized by warehouse → zone → rack → bin with all inventory details",
-	})
-	@ApiQuery({ name: "warehouseId", required: false, description: "Filter by warehouse" })
-	@ApiQuery({ name: "rackId", required: false, description: "Filter by rack" })
-	async generateInventoryReport(@Query("warehouseId") warehouseId?: string, @Query("rackId") rackId?: string) {
-		return this.svc.generateInventoryReport(warehouseId, rackId);
-	}
+	// @Get("reports/inventory")
+	// @ApiOperation({
+	// 	summary: "Generate comprehensive inventory status report",
+	// 	description: "Hierarchical report organized by warehouse → zone → rack → bin with all inventory details",
+	// })
+	// @ApiQuery({ name: "warehouseId", required: false, description: "Filter by warehouse" })
+	// @ApiQuery({ name: "rackId", required: false, description: "Filter by rack" })
+	// async generateInventoryReport(@Query("warehouseId") warehouseId?: string, @Query("rackId") rackId?: string) {
+	// 	return this.svc.generateInventoryReport(warehouseId, rackId);
+	// }
 
 	/**
 	 * GET /inventory/locations/formatted

@@ -419,154 +419,154 @@ export class InventoryService {
 		// Use findFirst to avoid relying on generated compound unique field typings
 		return this.prisma.inventory.findFirst({
 			where: { shipmentId: productId, warehouseId },
-			include: { locations: true, shipment: true },
+			include: { locations: true },
 		});
 	}
 
-	/**
-	 * NEW: Get inventory overview with real-time stock levels per warehouse
-	 * Requirement: "Allow users to view stock per warehouse and consolidate across all warehouses"
-	 */
-	async getInventoryOverview(warehouseId?: string) {
-		const where: any = {};
-		if (warehouseId) {
-			where.warehouseId = warehouseId;
-		}
+	// /**
+	//  * NEW: Get inventory overview with real-time stock levels per warehouse
+	//  * Requirement: "Allow users to view stock per warehouse and consolidate across all warehouses"
+	//  */
+	// async getInventoryOverview(warehouseId?: string) {
+	// 	const where: any = {};
+	// 	if (warehouseId) {
+	// 		where.warehouseId = warehouseId;
+	// 	}
 
-		const inventories = await this.prisma.inventory.findMany({
-			where,
-			include: {
-				shipment: true,
-				warehouse: true,
-				locations: {
-					include: {
-						bin: {
-							include: {
-								rack: {
-									include: {
-										zone: true,
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		});
+	// 	const inventories = await this.prisma.inventory.findMany({
+	// 		where,
+	// 		include: {
+	// 			shipment: true,
+	// 			warehouse: true,
+	// 			locations: {
+	// 				include: {
+	// 					bin: {
+	// 						include: {
+	// 							rack: {
+	// 								include: {
+	// 									zone: true,
+	// 								},
+	// 							},
+	// 						},
+	// 					},
+	// 				},
+	// 			},
+	// 		},
+	// 	});
 
-		return inventories.map((inv) => ({
-			productId: inv.shipmentId,
-			warehouseId: inv.warehouseId,
-			warehouseName: inv.warehouse.name,
-			availableQty: inv.locations.filter((loc) => loc.status === "AVAILABLE").reduce((sum, loc) => sum + loc.qty, 0),
-			reservedQty: inv.locations.filter((loc) => loc.status === "RESERVED").reduce((sum, loc) => sum + loc.qty, 0),
-			quarantineQty: inv.locations.filter((loc) => loc.status === "QUARANTINE").reduce((sum, loc) => sum + loc.qty, 0),
-			damagedQty: inv.locations.filter((loc) => loc.status === "DAMAGED").reduce((sum, loc) => sum + loc.qty, 0),
-			locationCount: inv.locations.length,
-			lastUpdated: inv.updatedAt,
-		}));
-	}
+	// 	return inventories.map((inv) => ({
+	// 		productId: inv.shipmentId,
+	// 		warehouseId: inv.warehouseId,
+	// 		warehouseName: inv.warehouse.name,
+	// 		availableQty: inv.locations.filter((loc) => loc.status === "AVAILABLE").reduce((sum, loc) => sum + loc.qty, 0),
+	// 		reservedQty: inv.locations.filter((loc) => loc.status === "RESERVED").reduce((sum, loc) => sum + loc.qty, 0),
+	// 		quarantineQty: inv.locations.filter((loc) => loc.status === "QUARANTINE").reduce((sum, loc) => sum + loc.qty, 0),
+	// 		damagedQty: inv.locations.filter((loc) => loc.status === "DAMAGED").reduce((sum, loc) => sum + loc.qty, 0),
+	// 		locationCount: inv.locations.length,
+	// 		lastUpdated: inv.updatedAt,
+	// 	}));
+	// }
 
-	/**
-	 * NEW: Get inventory by rack location
-	 * Requirement: "track inventory levels at the rack level"
-	 */
-	async getInventoryByRack(rackId: string) {
-		const locations = await this.prisma.inventoryLocation.findMany({
-			where: {
-				bin: {
-					rackId: rackId,
-				},
-			},
-			include: {
-				bin: true,
-				inventory: {
-					include: {
-						shipment: true,
-					},
-				},
-				Company: true,
-			},
-			orderBy: {
-				createdAt: "desc",
-			},
-		});
+	// /**
+	//  * NEW: Get inventory by rack location
+	//  * Requirement: "track inventory levels at the rack level"
+	//  */
+	// async getInventoryByRack(rackId: string) {
+	// 	const locations = await this.prisma.inventoryLocation.findMany({
+	// 		where: {
+	// 			bin: {
+	// 				rackId: rackId,
+	// 			},
+	// 		},
+	// 		include: {
+	// 			bin: true,
+	// 			inventory: {
+	// 				include: {
+	// 					shipment: true,
+	// 				},
+	// 			},
+	// 			Company: true,
+	// 		},
+	// 		orderBy: {
+	// 			createdAt: "desc",
+	// 		},
+	// 	});
 
-		return locations;
-	}
+	// 	return locations;
+	// }
 
 	/**
 	 * NEW: Generate inventory status report
 	 * Requirement: "Users should be able to generate reports showing inventory status for each rack and inventory per warehouse"
 	 */
-	async generateInventoryReport(warehouseId?: string, rackId?: string) {
-		const where: any = {};
+	// async generateInventoryReport(warehouseId?: string, rackId?: string) {
+	// 	const where: any = {};
 
-		if (warehouseId) {
-			where.inventory = {
-				warehouseId: warehouseId,
-			};
-		}
+	// 	if (warehouseId) {
+	// 		where.inventory = {
+	// 			warehouseId: warehouseId,
+	// 		};
+	// 	}
 
-		if (rackId) {
-			where.bin = {
-				rackId: rackId,
-			};
-		}
+	// 	if (rackId) {
+	// 		where.bin = {
+	// 			rackId: rackId,
+	// 		};
+	// 	}
 
-		const locations = await this.prisma.inventoryLocation.findMany({
-			where,
-			include: {
-				bin: {
-					include: {
-						rack: {
-							include: {
-								zone: true,
-							},
-						},
-					},
-				},
-				inventory: {
-					include: {
-						shipment: true,
-						warehouse: true,
-					},
-				},
-				Company: true,
-			},
-			orderBy: [{ inventory: { warehouse: { name: "asc" } } }, { bin: { rack: { zone: { name: "asc" } } } }, { bin: { rack: { name: "asc" } } }, { bin: { name: "asc" } }],
-		});
+	// 	const locations = await this.prisma.inventoryLocation.findMany({
+	// 		where,
+	// 		include: {
+	// 			bin: {
+	// 				include: {
+	// 					rack: {
+	// 						include: {
+	// 							zone: true,
+	// 						},
+	// 					},
+	// 				},
+	// 			},
+	// 			inventory: {
+	// 				include: {
+	// 					shipment: true,
+	// 					warehouse: true,
+	// 				},
+	// 			},
+	// 			Company: true,
+	// 		},
+	// 		orderBy: [{ inventory: { warehouse: { name: "asc" } } }, { bin: { rack: { zone: { name: "asc" } } } }, { bin: { rack: { name: "asc" } } }, { bin: { name: "asc" } }],
+	// 	});
 
-		// Group by warehouse -> zone -> rack -> bin
-		const report = locations.reduce((acc, loc) => {
-			const warehouseName = loc.inventory.warehouse.name;
-			const zoneName = loc.bin.rack.zone.name;
-			const rackName = loc.bin.rack.name;
-			const binName = loc.bin.name;
+	// 	// Group by warehouse -> zone -> rack -> bin
+	// 	const report = locations.reduce((acc, loc) => {
+	// 		const warehouseName = loc.inventory.warehouse.name;
+	// 		const zoneName = loc.bin.rack.zone.name;
+	// 		const rackName = loc.bin.rack.name;
+	// 		const binName = loc.bin.name;
 
-			if (!acc[warehouseName]) acc[warehouseName] = {};
-			if (!acc[warehouseName][zoneName]) acc[warehouseName][zoneName] = {};
-			if (!acc[warehouseName][zoneName][rackName]) acc[warehouseName][zoneName][rackName] = {};
-			if (!acc[warehouseName][zoneName][rackName][binName]) {
-				acc[warehouseName][zoneName][rackName][binName] = [];
-			}
+	// 		if (!acc[warehouseName]) acc[warehouseName] = {};
+	// 		if (!acc[warehouseName][zoneName]) acc[warehouseName][zoneName] = {};
+	// 		if (!acc[warehouseName][zoneName][rackName]) acc[warehouseName][zoneName][rackName] = {};
+	// 		if (!acc[warehouseName][zoneName][rackName][binName]) {
+	// 			acc[warehouseName][zoneName][rackName][binName] = [];
+	// 		}
 
-			acc[warehouseName][zoneName][rackName][binName].push({
-				qty: loc.qty,
-				status: loc.status,
-				condition: loc.condition,
-				clientName: loc.clientName,
-				lotNumber: loc.lotNumber,
-				expiryDate: loc.expiryDate,
-				specialHandling: loc.specialHandling,
-				arrivalDate: loc.createdAt,
-			});
+	// 		acc[warehouseName][zoneName][rackName][binName].push({
+	// 			qty: loc.qty,
+	// 			status: loc.status,
+	// 			condition: loc.condition,
+	// 			clientName: loc.clientName,
+	// 			lotNumber: loc.lotNumber,
+	// 			expiryDate: loc.expiryDate,
+	// 			specialHandling: loc.specialHandling,
+	// 			arrivalDate: loc.createdAt,
+	// 		});
 
-			return acc;
-		}, {} as any);
+	// 		return acc;
+	// 	}, {} as any);
 
-		return report;
-	}
+	// 	return report;
+	// }
 
 	/**
 	 * NEW: Get consolidated inventory across all warehouses
