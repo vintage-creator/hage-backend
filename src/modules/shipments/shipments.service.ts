@@ -694,11 +694,11 @@ export class ShipmentsService {
 		if (!user) throw new ForbiddenException("User not found");
 
 		// Base where clause based on user role
-		const where: any = this.buildWhereClauseForUser(user);
+		// const where: any = this.buildWhereClauseForUser(user);
 
 		// Get all shipments for this user
 		const shipments = await this.prisma.shipment.findMany({
-			where,
+			where: { createdBy: userId },
 			include: {
 				transporter: true,
 				statusHistory: {
@@ -765,7 +765,7 @@ export class ShipmentsService {
 		// Recent activity (last 10 status updates)
 		const recentActivity = await this.prisma.shipmentStatusHistory.findMany({
 			where: {
-				shipment: where,
+				shipment: { createdBy: userId },
 			},
 			take: 10,
 			orderBy: { timestamp: "desc" },
