@@ -279,7 +279,7 @@ model Inventory {
   updatedAt       DateTime @updatedAt
 
   // Relations
-  shipment        Shipment    @relation(fields: [shipmentId], references: [orderId])
+ // shipment        Shipment    @relation(fields: [shipmentId], references: [orderId])
   warehouse Warehouse           @relation(fields: [warehouseId], references: [id])
   locations InventoryLocation[]
   User      User?               @relation(fields: [userId], references: [id])
@@ -390,7 +390,7 @@ model Shipment {
   rack Rack? @relation(fields: [assignedRackId], references: [id])
   bin  Bin?  @relation(fields: [assignedBinId], references: [id])
 
-  inventory     Inventory[]
+  //inventory     Inventory[]
   documents     ShipmentDocument[]
   statusHistory ShipmentStatusHistory[]
   events        TrackingEvent[]

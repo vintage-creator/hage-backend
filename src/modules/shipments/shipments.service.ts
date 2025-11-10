@@ -271,12 +271,7 @@ export class ShipmentsService {
 		});
 
 		// 7. Notifications
-		await Promise.all([
-			this.createNotification(lspUserId, `You accepted shipment ${updated.orderId}`, "in-app"),
-			this.createNotification(updated.customerId, `Shipment ${updated.orderId} has been accepted`, "in-app"),
-			dto.transporterId ? this.createNotification(dto.transporterId, `You have been assigned to shipment ${updated.orderId}`, "in-app") : Promise.resolve(),
-			dto.warehouseId ? this.createNotification(dto.warehouseId, `Shipment ${updated.orderId} assigned to your warehouse`, "in-app") : Promise.resolve(),
-		]);
+		await Promise.all([this.createNotification(lspUserId, `You accepted shipment ${updated.orderId}`, "in-app"), this.createNotification(updated.customerId, `Shipment ${updated.orderId} has been accepted`, "in-app"), dto.transporterId ? this.createNotification(dto.transporterId, `You have been assigned to shipment ${updated.orderId}`, "in-app") : Promise.resolve(), dto.warehouseId ? this.createNotification(dto.warehouseId, `Shipment ${updated.orderId} assigned to your warehouse`, "in-app") : Promise.resolve()]);
 
 		// 8. Send email to client
 		if (updated.email) {
@@ -373,12 +368,7 @@ export class ShipmentsService {
 		}
 
 		// Create Notifications using updated info
-		await Promise.all([
-			this.createNotification(updatedBy, `You updated shipment ${updated.orderId} to ${dto.status}`, "in-app"),
-			this.createNotification(updated.customerId, `Your shipment ${updated.orderId} status changed to ${dto.status}`, "in-app"),
-			updated.assignedTransporterId ? this.createNotification(updated.assignedTransporterId, `Shipment ${updated.orderId} is now ${dto.status}`, "in-app") : Promise.resolve(),
-			updated.assignedWarehouseId ? this.createNotification(updated.assignedWarehouseId, `Shipment ${updated.orderId} is now ${dto.status}`, "in-app") : Promise.resolve(),
-		]);
+		await Promise.all([this.createNotification(updatedBy, `You updated shipment ${updated.orderId} to ${dto.status}`, "in-app"), this.createNotification(updated.customerId, `Your shipment ${updated.orderId} status changed to ${dto.status}`, "in-app"), updated.assignedTransporterId ? this.createNotification(updated.assignedTransporterId, `Shipment ${updated.orderId} is now ${dto.status}`, "in-app") : Promise.resolve(), updated.assignedWarehouseId ? this.createNotification(updated.assignedWarehouseId, `Shipment ${updated.orderId} is now ${dto.status}`, "in-app") : Promise.resolve()]);
 
 		return updated;
 	}
@@ -721,9 +711,7 @@ export class ShipmentsService {
 		const expectedDeliveryBuffer = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
 		// 1. Active Vehicles (unique transporters currently assigned)
-		const activeVehicles = new Set(
-			shipments.filter((s) => s.assignedTransporterId && ["ACCEPTED", "EN_ROUTE_TO_PICKUP", "PICKED_UP", "IN_TRANSIT"].includes(s.status)).map((s) => s.assignedTransporterId)
-		).size;
+		const activeVehicles = new Set(shipments.filter((s) => s.assignedTransporterId && ["ACCEPTED", "EN_ROUTE_TO_PICKUP", "PICKED_UP", "IN_TRANSIT"].includes(s.status)).map((s) => s.assignedTransporterId)).size;
 
 		// 2. Shipments In Transit
 		const shipmentsInTransit = shipments.filter((s) => ["EN_ROUTE_TO_PICKUP", "PICKED_UP", "IN_TRANSIT", "ARRIVED_AT_DESTINATION"].includes(s.status)).length;
@@ -817,10 +805,10 @@ export class ShipmentsService {
 
 		if (user.kind === "LOGISTIC_SERVICE_PROVIDER" || user.role === "CROSS_BORDER_LOGISTICS") {
 			// LSP can see all shipments - no filter needed
-			return where;
+			return (where.createdBy = user.id);
 		} else if (user.role === "TRANSPORTER" || user.role === "LAST_MILE_PROVIDER") {
 			// Transporters only see assigned shipments
-			where.assignedTransporterId = user.id;
+			where.createdBy = user.id;
 		} else if (user.kind === "ENTERPRISE" || user.kind === "DISTRIBUTOR") {
 			// Enterprises see shipments they created
 			where.createdBy = user.id;
@@ -989,10 +977,7 @@ export class ShipmentsService {
 		});
 		if (!shipment) throw new NotFoundException("Shipment not found");
 
-		const totalCost =
-			dto.baseFrieght || dto.handlingFee || dto.insuranceFee
-				? this.calculateTotalCost((dto.baseFrieght as any) ?? shipment.baseFrieght, (dto.handlingFee as any) ?? shipment.handlingFee, dto.insuranceFee ?? (shipment.insuranceFee as any))
-				: shipment.totalCost;
+		const totalCost = dto.baseFrieght || dto.handlingFee || dto.insuranceFee ? this.calculateTotalCost((dto.baseFrieght as any) ?? shipment.baseFrieght, (dto.handlingFee as any) ?? shipment.handlingFee, dto.insuranceFee ?? (shipment.insuranceFee as any)) : shipment.totalCost;
 
 		const updated = await this.prisma.shipment.update({
 			where: { id: shipmentId },
