@@ -13,11 +13,10 @@ export class InventoryService {
 	 * Create or return an Inventory row for product+warehouse.
 	 * If totalQty is provided, set it (in practice this should reflect InventoryLocation sums).
 	 */
-	async createInventory(dto: CreateInventoryDto, userId: String) {
+	async createInventory(dto: CreateInventoryDto, userId: string) {
 		// Validate references
 		const [warehouse] = await Promise.all([this.prisma.warehouse.findUnique({ where: { id: dto.warehouseId } })]);
 
-		// if (!shipment) throw new NotFoundException("Shipment not found");
 		if (!warehouse) throw new NotFoundException("Warehouse not found");
 
 		// Validate storage structure
@@ -39,7 +38,7 @@ export class InventoryService {
 
 		if (existingInventory) {
 			// Update relevant fields if record exists
-			return this.prisma.inventory.update({
+			const updatedInventory = await this.prisma.inventory.update({
 				where: { id: existingInventory.id },
 				data: {
 					condition: dto.condition ?? existingInventory.condition,
@@ -48,10 +47,20 @@ export class InventoryService {
 					updatedAt: new Date(),
 				},
 			});
+
+			// Increment bin qty since more stock is added
+			await this.prisma.bin.update({
+				where: { id: dto.binId },
+				data: {
+					currentQty: { increment: 1 },
+				},
+			});
+
+			return updatedInventory;
 		}
 
 		// Create a new inventory record
-		return this.prisma.inventory.create({
+		const newInventory = await this.prisma.inventory.create({
 			data: {
 				shipmentId: dto.shipmentId,
 				warehouseId: dto.warehouseId,
@@ -64,6 +73,16 @@ export class InventoryService {
 				clientName: dto.clientName,
 			},
 		});
+
+		// Increment bin qty for new inventory
+		await this.prisma.bin.update({
+			where: { id: dto.binId },
+			data: {
+				currentQty: { increment: 1 },
+			},
+		});
+
+		return newInventory;
 	}
 
 	/**
