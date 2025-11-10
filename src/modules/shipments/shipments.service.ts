@@ -391,16 +391,17 @@ export class ShipmentsService {
 
 		// ROLE-BASED FILTERING
 		if (user.kind === "LOGISTIC_SERVICE_PROVIDER" || user.role === "CROSS_BORDER_LOGISTICS") {
+			where.createdBy = userId;
 			// LSP and Cross-Border Logistics can see ALL shipments
 			// No additional filter needed - they have full access
 			this.logger.log(`LSP/Admin ${userId} accessing all shipments`);
 		} else if (user.role === "TRANSPORTER") {
 			// Transporters can only see shipments assigned to them
-			where.assignedTransporterId = userId;
+			where.createdBy = userId;
 			this.logger.log(`Transporter ${userId} accessing assigned shipments`);
 		} else if (user.role === "LAST_MILE_PROVIDER") {
 			// Last mile providers can see shipments assigned to them
-			where.assignedTransporterId = userId;
+			where.createdBy = userId;
 			this.logger.log(`Last mile provider ${userId} accessing assigned shipments`);
 		} else if (user.kind === "ENTERPRISE" || user.kind === "DISTRIBUTOR") {
 			// Enterprises and Distributors can only see shipments they created
@@ -408,7 +409,7 @@ export class ShipmentsService {
 			this.logger.log(`Enterprise/Distributor ${userId} accessing their shipments`);
 		} else if (user.kind === "END_USER") {
 			// End users can only see shipments where they are the customer
-			where.customerId = userId;
+			where.createdBy = userId;
 			this.logger.log(`End user ${userId} accessing their shipments`);
 		} else {
 			// Unknown role - deny access
@@ -651,7 +652,7 @@ export class ShipmentsService {
 
 		const [shipments, total] = await Promise.all([
 			this.prisma.shipment.findMany({
-				where,
+				where: { createdBy: lspUserId },
 				skip,
 				take: limit,
 				orderBy: { createdAt: "desc" },
@@ -876,9 +877,6 @@ export class ShipmentsService {
 		if (!user) return false;
 
 		// LSP can access everything
-		if (user.kind === "LOGISTIC_SERVICE_PROVIDER" || user.role === "CROSS_BORDER_LOGISTICS") {
-			return true;
-		}
 
 		const shipment = await this.prisma.shipment.findUnique({
 			where: { id: shipmentId },
@@ -891,9 +889,13 @@ export class ShipmentsService {
 
 		if (!shipment) return false;
 
+		if (user.kind === "LOGISTIC_SERVICE_PROVIDER" || user.role === "CROSS_BORDER_LOGISTICS") {
+			return shipment.createdBy === userId;
+		}
+
 		// Check based on role
 		if (user.role === "TRANSPORTER" || user.role === "LAST_MILE_PROVIDER") {
-			return shipment.assignedTransporterId === userId;
+			return shipment.createdBy === userId;
 		}
 
 		if (user.kind === "ENTERPRISE" || user.kind === "DISTRIBUTOR") {
@@ -901,7 +903,7 @@ export class ShipmentsService {
 		}
 
 		if (user.kind === "END_USER") {
-			return shipment.customerId === userId;
+			return shipment.createdBy === userId;
 		}
 
 		return false;

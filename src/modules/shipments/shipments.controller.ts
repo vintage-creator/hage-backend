@@ -158,8 +158,7 @@ export class ShipmentsController {
 	@ApiBearerAuth("access-token")
 	@ApiOperation({
 		summary: "List all shipments",
-		description:
-			"Fetches all shipments belonging to the authenticated user. Can be filtered by status (e.g., PENDING_ACCEPTANCE, ACCEPTED, EN_ROUTE_TO_PICKUP, PICKED_UP, IN_TRANSIT, ARRIVED_AT_DESTINATION, COMPLETED, CANCELLED).",
+		description: "Fetches all shipments belonging to the authenticated user. Can be filtered by status (e.g., PENDING_ACCEPTANCE, ACCEPTED, EN_ROUTE_TO_PICKUP, PICKED_UP, IN_TRANSIT, ARRIVED_AT_DESTINATION, COMPLETED, CANCELLED).",
 	})
 	@ApiQuery({
 		name: "status",
@@ -197,8 +196,8 @@ export class ShipmentsController {
 
 	// ✅ LSP DASHBOARD SHIPMENTS
 	@Get("admin/all")
-	@UseGuards(JwtAuthGuard, RolesGuard)
-	@Roles("LOGISTIC_SERVICE_PROVIDER")
+	@UseGuards(JwtAuthGuard)
+	// @Roles("LOGISTIC_SERVICE_PROVIDER")
 	@ApiBearerAuth("access-token")
 	@ApiOperation({
 		summary: "Get all shipments (LSP view)",
