@@ -397,7 +397,7 @@ export class AuthService {
     const genericResp = {
       ok: true,
       message:
-        "If an account with that email exists, a reset email has been sent.",
+        "Password Reset Email Sent. Your password reset email has been successfully sent. It typically arrives within 5 minutes but may take up to 24 hours. If you have not received it after 24 hours, please contact our support team for assistance.",
     };
 
     if (!email) return genericResp;
@@ -529,6 +529,22 @@ export class AuthService {
     const rec = await this.tokenService.findPasswordResetToken(token);
     if (!rec || rec.used || rec.expiresAt < new Date())
       throw new BadRequestException("Invalid or expired token");
+
+    // Fetch the user's current password hash to check reuse
+    const existingUser = await this.prisma.user.findUnique({
+      where: { id: rec.userId },
+      select: { password: true },
+    });
+
+    // If user has an existing password, compare it to the new plaintext password
+    if (existingUser?.password) {
+      const isSameAsOld = await bcrypt.compare(password, existingUser.password);
+      if (isSameAsOld) {
+        throw new BadRequestException(
+          "New password must be different from your previous password."
+        );
+      }
+    }
 
     const hashed = await bcrypt.hash(password, 10);
 
