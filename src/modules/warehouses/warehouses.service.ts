@@ -488,6 +488,7 @@ export class WarehousesService {
 				},
 			},
 		});
+		
 
 		// Filter bins by available capacity
 		const suitableBins = availableBins.filter((bin) => {
