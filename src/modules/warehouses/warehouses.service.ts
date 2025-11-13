@@ -467,11 +467,13 @@ export class WarehousesService {
 		if (options.requiresTemperature) {
 			binConditions.tempMin = { not: null };
 			binConditions.tempMax = { not: null };
+
 			if (options.tempMin !== undefined && options.tempMax !== undefined) {
 				binConditions.tempMin = { lte: options.tempMin };
 				binConditions.tempMax = { gte: options.tempMax };
 			}
 		}
+
 		if (options.isHazardous) binConditions.allowsHazardous = true;
 		if (options.needsQuarantine) binConditions.isQuarantine = true;
 
@@ -487,10 +489,17 @@ export class WarehousesService {
 			},
 		});
 
-		// Filter bins by capacity
+		// Filter bins by available capacity
 		const suitableBins = availableBins.filter((bin) => {
 			const availableCapacity = bin.capacity - bin.currentQty - bin.reservedQty;
-			return availableCapacity >= (options.requiredCapacity || 0);
+
+			// Exclude bins that are full or over capacity
+			if (availableCapacity <= 0) return false;
+
+			// If a specific required capacity is given, ensure it fits
+			if (options.requiredCapacity && availableCapacity < options.requiredCapacity) return false;
+
+			return true;
 		});
 
 		if (suitableBins.length === 0) {
