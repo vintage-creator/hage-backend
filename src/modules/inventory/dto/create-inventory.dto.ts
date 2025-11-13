@@ -1,5 +1,7 @@
-import { IsString, IsOptional, IsInt, Min } from "class-validator";
+import { IsString, IsOptional, IsInt, Min, ValidateNested, IsNotEmpty } from "class-validator";
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { Type } from "class-transformer";
+import { LocationDto } from "../../shipments/dto/create-shipment.dto";
 
 export class CreateInventoryDto {
 	@ApiProperty({ description: "ID of the product associated with the inventory" })
@@ -10,14 +12,23 @@ export class CreateInventoryDto {
 	@IsString()
 	warehouseId!: string;
 
-	// @ApiProperty({ description: "ID of the user who created this inventory record" })
-	// @IsString()
-	// createdBy!: string;
+	@ValidateNested({ message: "Origin must be a valid location object" })
+	@Type(() => LocationDto)
+	@IsNotEmpty({ message: "Origin is required" })
+	origin!: LocationDto;
+
+	@ValidateNested({ message: "Destination must be a valid location object" })
+	@Type(() => LocationDto)
+	@IsNotEmpty({ message: "Destination is required" })
+	destination!: LocationDto;
 
 	@ApiPropertyOptional({ description: "Client name associated with this inventory record" })
 	@IsOptional()
 	@IsString()
 	clientName?: string;
+
+	@IsOptional()
+	pickupDate?: string;
 
 	@ApiPropertyOptional({ description: "Rack ID where the item is stored" })
 	@IsOptional()

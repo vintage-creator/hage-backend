@@ -20,7 +20,7 @@ export class InventoryController {
 
 	@Post()
 	@ApiOperation({ summary: "Create or upsert inventory (product + warehouse)" })
-	async createInventory(@Body() dto: CreateInventoryDto, @Req() req: any) {
+	async createInventory(@Body() dto: any, @Req() req: any) {
 		const createdBy = req.user?.id || req.user?.sub;
 		return this.svc.createInventory(dto, createdBy);
 	}

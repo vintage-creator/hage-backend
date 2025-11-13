@@ -1,7 +1,7 @@
 import { IsString, IsEmail, IsOptional, IsNotEmpty, IsNumber, IsEnum, Min, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
 
-class LocationDto {
+export class LocationDto {
 	@IsString({ message: "Country must be a string" })
 	@IsNotEmpty({ message: "Country is required" })
 	country!: string;

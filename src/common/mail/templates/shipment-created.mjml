@@ -71,12 +71,8 @@
           target="_blank"
           padding-top="18px"
         >
-          Track Your Shipment
+          Join waitlist
         </mj-button>
-
-        <mj-text color="#6B7280" font-size="13px" padding-top="18px">
-          You can use your tracking number anytime to check delivery progress.
-        </mj-text>
 
         <mj-divider border-color="#E5E7EB" padding="20px 0" />
 
