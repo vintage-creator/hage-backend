@@ -11,6 +11,7 @@ import type { StorageService } from "../../common/storage/storage.interface";
 import { MailService } from "../../common/mail/mail.service";
 import { ConfigService } from "@nestjs/config";
 import { AnalyticsResponseDto } from "./dto/analytics-shipment.dto";
+import UrlService from "../auth/url.service";
 
 enum DocumentType {
 	COMMERCIAL_INVOICE = "COMMERCIAL_INVOICE",
@@ -61,7 +62,7 @@ export class ShipmentsService {
 		});
 	}
 
-	constructor(private readonly prisma: PrismaService, @Inject("StorageService") private readonly storage: StorageService, private readonly mailer: MailService, private readonly cfg: ConfigService) {}
+	constructor(private readonly prisma: PrismaService, @Inject("StorageService") private readonly storage: StorageService, private readonly mailer: MailService, private readonly cfg: ConfigService, private readonly urlService: UrlService) {}
 
 	// CREATE SHIPMENT (Step 1: Order Creation)
 	async create(dto: any, lspUserId: string, files?: Express.Multer.File[]): Promise<Shipment> {
@@ -146,7 +147,7 @@ export class ShipmentsService {
 					destination: destinationText,
 					estimatedDelivery: this.prettyDate(shipment.deliveryDate ?? dto.deliveryDate),
 					status: "Pending Acceptance",
-					trackingUrl: `${this.cfg.get("APP_URL")}/shipments/track/${shipment.orderId}`,
+					trackingUrl: `${this.urlService.normalizePrefix()}`,
 				});
 			}
 

@@ -5,10 +5,12 @@ import { CreateInventoryDto } from "./dto/create-inventory.dto";
 import { CreateInventoryLocationDto } from "./dto/create-inventory-location.dto";
 import { UpdateInventoryLocationDto } from "./dto/update-inventory-location.dto";
 import { ShipmentStatus } from "../shipments/dto/update-status.dto";
+import { MailService } from "../../common/mail/mail.service";
+import UrlService from "../auth/url.service";
 
 @Injectable()
 export class InventoryService {
-	constructor(private readonly prisma: PrismaService) {}
+	constructor(private readonly prisma: PrismaService, private readonly mailer: MailService, private readonly urlService: UrlService) {}
 
 	private safeParseLocation(val: any): any | null {
 		if (!val && val !== 0) return null;
@@ -27,15 +29,36 @@ export class InventoryService {
 		}
 	}
 
+	private formatLocationText(loc: any) {
+		if (!loc) return "";
+		const address = loc.address || loc.addr || "";
+		const state = loc.state || loc.region || "";
+		const country = loc.country || "";
+		const phone = loc.phone || loc.contact || loc.telephone || "";
+		const parts = [address, state, country].filter(Boolean).join(", ");
+		return parts ? `${parts}. Contact: ${phone || "N/A"}` : phone || "N/A";
+	}
+
+	private prettyDate(d?: Date | string | null) {
+		if (!d) return "TBD";
+		const dt = d instanceof Date ? d : new Date(d);
+		return dt.toLocaleDateString("en-US", {
+			year: "numeric",
+			month: "long",
+			day: "numeric",
+		});
+	}
+
 	/**
 	 * Create or return an Inventory row for product+warehouse.
 	 * If totalQty is provided, set it (in practice this should reflect InventoryLocation sums).
 	 */
 	async createInventory(dto: CreateInventoryDto, userId: string) {
 		// Validate references
-		const [warehouse] = await Promise.all([this.prisma.warehouse.findUnique({ where: { id: dto.warehouseId } })]);
+		const [warehouse, user] = await Promise.all([this.prisma.warehouse.findUnique({ where: { id: dto.warehouseId } }), this.prisma.user.findUnique({ where: { id: userId } })]);
 
 		if (!warehouse) throw new NotFoundException("Warehouse not found");
+		if (!user) throw new NotFoundException("User not found");
 
 		// Validate storage structure
 		const [rack, bin] = await Promise.all([this.prisma.rack.findUnique({ where: { id: dto.rackId } }), this.prisma.bin.findUnique({ where: { id: dto.binId } })]);
@@ -113,8 +136,8 @@ export class InventoryService {
 				insuranceFee: 0.0,
 				totalCost: 0.0,
 				cargoType: "",
-				tons: 1.0,
-				weight: 1.0,
+				tons: 0.0,
+				weight: 0.0,
 			},
 		});
 
@@ -125,6 +148,24 @@ export class InventoryService {
 				updatedBy: userId,
 			},
 		});
+
+		const originObj = this.safeParseLocation(createdShipment.origin ?? dto.origin);
+		const destinationObj = this.safeParseLocation(createdShipment.destination ?? dto.destination);
+
+		const originText = this.formatLocationText(originObj);
+		const destinationText = this.formatLocationText(destinationObj);
+
+		if (user.email) {
+			await this.mailer.sendShipmentCreated(user.email, {
+				clientName: dto.clientName,
+				trackingNumber: createdShipment.orderId,
+				origin: originText,
+				destination: destinationText,
+				estimatedDelivery: this.prettyDate(createdShipment.pickupDate ?? dto.pickupDate),
+				status: "Accepted",
+				trackingUrl: `${this.urlService.normalizePrefix()}`,
+			});
+		}
 
 		// Increment bin qty for new inventory
 		await this.prisma.bin.update({
