@@ -712,7 +712,7 @@ export class ShipmentsService {
 		const expectedDeliveryBuffer = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
 		// 1. Active Vehicles (unique transporters currently assigned)
-		const activeVehicles = new Set(shipments.filter((s) => s.assignedTransporterId && ["ACCEPTED", "EN_ROUTE_TO_PICKUP", "PICKED_UP", "IN_TRANSIT"].includes(s.status)).map((s) => s.assignedTransporterId)).size;
+		const activeVehicles = shipments.filter((s) => ["ACCEPTED", "EN_ROUTE_TO_PICKUP", "PICKED_UP", "IN_TRANSIT"].includes(s.status)).length;
 
 		// 2. Shipments In Transit
 		const shipmentsInTransit = shipments.filter((s) => ["EN_ROUTE_TO_PICKUP", "PICKED_UP", "IN_TRANSIT", "ARRIVED_AT_DESTINATION"].includes(s.status)).length;
@@ -780,7 +780,7 @@ export class ShipmentsService {
 		});
 
 		return {
-			activeVehicles,
+			activeShipment: activeVehicles,
 			shipmentsInTransit,
 			completedDeliveries,
 			delayedShipments,

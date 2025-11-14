@@ -1,5 +1,5 @@
 export class AnalyticsResponseDto {
-	activeVehicles!: number;
+	activeShipment!: number;
 	shipmentsInTransit!: number;
 	completedDeliveries!: number;
 	delayedShipments!: number;
