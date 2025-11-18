@@ -135,7 +135,7 @@ export class InventoryService {
 				handlingFee: 0.0,
 				insuranceFee: 0.0,
 				totalCost: 0.0,
-				cargoType: "",
+				cargoType: dto.cargoType as any,
 				tons: 0.0,
 				weight: 0.0,
 			},

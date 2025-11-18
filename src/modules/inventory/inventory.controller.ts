@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Patch, Delete, Query, UseGuards, Req, BadRequestException } from "@nestjs/common";
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse } from "@nestjs/swagger";
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiOkResponse } from "@nestjs/swagger";
 import { InventoryService } from "./inventory.service";
 import { CreateInventoryDto } from "./dto/create-inventory.dto";
 import { CreateInventoryLocationDto } from "./dto/create-inventory-location.dto";
@@ -17,10 +17,37 @@ export class InventoryController {
 	// ============================================
 	// INVENTORY (PRODUCT + WAREHOUSE) ENDPOINTS
 	// ============================================
-
 	@Post()
-	@ApiOperation({ summary: "Create or upsert inventory (product + warehouse)" })
-	async createInventory(@Body() dto: any, @Req() req: any) {
+	@ApiOperation({
+		summary: "Create a new inventory record",
+		description: "Creates or upserts inventory linked to a shipment and warehouse.",
+	})
+	@ApiOkResponse({
+		description: "Inventory successfully created",
+		schema: {
+			example: {
+				id: "inv_01727",
+				shipmentId: "shp_abc123",
+				warehouseId: "wh_98002",
+				origin: {
+					address: "Lagos",
+					city: "Ikeja",
+					state: "Lagos",
+					country: "Nigeria",
+				},
+				destination: {
+					address: "Abuja",
+					city: "Garki",
+					state: "Abuja",
+					country: "Nigeria",
+				},
+				status: "In Storage",
+				createdAt: "2025-11-17T10:00:00.000Z",
+				createdBy: "user_123",
+			},
+		},
+	})
+	async createInventory(@Body() dto: CreateInventoryDto, @Req() req: any) {
 		const createdBy = req.user?.id || req.user?.sub;
 		return this.svc.createInventory(dto, createdBy);
 	}
