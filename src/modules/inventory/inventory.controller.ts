@@ -47,7 +47,7 @@ export class InventoryController {
 			},
 		},
 	})
-	async createInventory(@Body() dto: any, @Req() req: any) {
+	async createInventory(@Body() dto: CreateInventoryDto, @Req() req: any) {
 		const createdBy = req.user?.id || req.user?.sub;
 		return this.svc.createInventory(dto, createdBy);
 	}
@@ -218,29 +218,21 @@ export class InventoryController {
 	@Get("locations")
 	@ApiOperation({
 		summary: "Get all inventory locations by warehouse",
-		description: "Returns all inventory locations belonging to a specific warehouse ID only",
+		description: "Returns inventory locations belonging to a specific warehouse ID with pagination",
 	})
-	@ApiQuery({
-		name: "warehouseId",
-		required: true,
-		type: String,
-		description: "Warehouse ID (required)",
-	})
-	@ApiResponse({
-		status: 200,
-		description: "Successfully retrieved inventory locations for warehouse",
-	})
-	@ApiResponse({
-		status: 400,
-		description: "Bad Request - warehouseId is required",
-	})
-	async getInventoryByWarehouse(@Query("warehouseId") warehouseId: string) {
+	@ApiQuery({ name: "warehouseId", required: true, type: String })
+	@ApiQuery({ name: "page", required: false, type: Number })
+	@ApiQuery({ name: "limit", required: false, type: Number })
+	@ApiResponse({ status: 200, description: "Successfully retrieved inventory locations for warehouse" })
+	@ApiResponse({ status: 400, description: "Bad Request - warehouseId is required" })
+	async getInventoryByWarehouse(@Query("warehouseId") warehouseId: string, @Query("page") page: string, @Query("limit") limit: string) {
 		if (!warehouseId) {
 			throw new BadRequestException("warehouseId is required");
 		}
 
-		console.log(warehouseId);
+		const pageNum = page ? parseInt(page) : 1;
+		const limitNum = limit ? parseInt(limit) : 10;
 
-		return this.svc.getInventoryByWarehouseFormatted(warehouseId);
+		return this.svc.getInventoryByWarehouseFormatted(warehouseId, pageNum, limitNum);
 	}
 }

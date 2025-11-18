@@ -55,10 +55,11 @@ export class InventoryService {
 	 */
 	async createInventory(dto: CreateInventoryDto, userId: string) {
 		// Validate references
-		const [warehouse, user] = await Promise.all([this.prisma.warehouse.findUnique({ where: { id: dto.warehouseId } }), this.prisma.user.findUnique({ where: { id: userId } })]);
+		const [warehouse, user, shipment] = await Promise.all([this.prisma.warehouse.findUnique({ where: { id: dto.warehouseId } }), this.prisma.user.findUnique({ where: { id: userId } }), this.prisma.shipment.findUnique({ where: { orderId: dto.shipmentId } })]);
 
 		if (!warehouse) throw new NotFoundException("Warehouse not found");
 		if (!user) throw new NotFoundException("User not found");
+		if (shipment) throw new BadRequestException("Shipment ID already exist");
 
 		// Validate storage structure
 		const [rack, bin] = await Promise.all([this.prisma.rack.findUnique({ where: { id: dto.rackId } }), this.prisma.bin.findUnique({ where: { id: dto.binId } })]);
@@ -115,6 +116,7 @@ export class InventoryService {
 				status: dto.status,
 				specialHandling: dto.specialHandling,
 				clientName: dto.clientName,
+				userId: userId,
 			},
 		});
 
@@ -139,6 +141,13 @@ export class InventoryService {
 				cargoType: dto.cargoType as any,
 				tons: 0.0,
 				weight: 0.0,
+
+				assignedWarehouseId: dto.warehouseId,
+				assignedBinId: dto.binId,
+				assignedRackId: dto.rackId,
+				assignedZoneId: dto.zoneId,
+
+				specialHandling: dto.specialHandling,
 			},
 		});
 
@@ -157,15 +166,23 @@ export class InventoryService {
 		const destinationText = this.formatLocationText(destinationObj);
 
 		if (user.email) {
-			await this.mailer.sendShipmentCreated(user.email, {
-				clientName: dto.clientName,
-				trackingNumber: createdShipment.orderId,
-				origin: originText,
-				destination: destinationText,
-				estimatedDelivery: this.prettyDate(createdShipment.deliveryDate ?? dto.deliveryDate),
-				status: "Accepted",
-				trackingUrl: `${this.urlService.normalizePrefix()}`,
-			});
+			try {
+				await this.mailer.sendShipmentCreated(user.email, {
+					clientName: dto.clientName,
+					trackingNumber: createdShipment.orderId,
+					origin: originText,
+					destination: destinationText,
+					estimatedDelivery: this.prettyDate(createdShipment.deliveryDate ?? dto.deliveryDate),
+					status: "Accepted",
+					trackingUrl: `${this.urlService.normalizePrefix()}`,
+				});
+			} catch (err: any) {
+				// Log and continue
+				console.error("Failed to send shipment email:", err?.message || err);
+
+				// Optionally: store failed email in DB for retry queue
+				// await this.prisma.emailQueue.create({ data: { type: 'SHIPMENT_CREATED', payload: {...}, error: String(err) } });
+			}
 		}
 
 		// Increment bin qty for new inventory
@@ -745,20 +762,89 @@ export class InventoryService {
 	/**
 	 * Returns: Client Name, Shipment ID, Rack, Bin, Status, Condition, Special Handling, Arrival Date
 	 */
-	async getInventoryByWarehouseFormatted(warehouseId: string) {
+	// async getInventoryByWarehouseFormatted(warehouseId: string) {
+	// 	if (!warehouseId) {
+	// 		throw new Error("warehouseId is required");
+	// 	}
+
+	// 	const inventories = await this.prisma.inventory.findMany({
+	// 		where: { warehouseId },
+	// 		orderBy: { createdAt: "desc" },
+	// 		include: {
+	// 			warehouse: true,
+	// 		},
+	// 	});
+
+	// 	return await Promise.all(
+	// 		inventories.map(async (inv) => {
+	// 			// 🔹 Safe parse for specialHandling
+	// 			let specialHandlingParsed: any = null;
+	// 			if (inv.specialHandling) {
+	// 				try {
+	// 					specialHandlingParsed = typeof inv.specialHandling === "string" && inv.specialHandling.trim().startsWith("{") ? JSON.parse(inv.specialHandling) : inv.specialHandling;
+	// 				} catch {
+	// 					specialHandlingParsed = inv.specialHandling;
+	// 				}
+	// 			}
+
+	// 			// 🔹 Fetch Rack and Bin names if IDs exist
+	// 			let rackName = "N/A";
+	// 			let binName = "N/A";
+
+	// 			if (inv.rackId) {
+	// 				const rack = await this.prisma.rack.findUnique({
+	// 					where: { id: inv.rackId },
+	// 					select: { name: true },
+	// 				});
+	// 				rackName = rack?.name || "N/A";
+	// 			}
+
+	// 			if (inv.binId) {
+	// 				const bin = await this.prisma.bin.findUnique({
+	// 					where: { id: inv.binId },
+	// 					select: { name: true },
+	// 				});
+	// 				binName = bin?.name || "N/A";
+	// 			}
+
+	// 			return {
+	// 				clientName: inv.clientName || "N/A",
+	// 				shipmentId: inv.shipmentId || "N/A",
+	// 				rack: rackName,
+	// 				bin: binName,
+	// 				status: inv.status || "N/A",
+	// 				condition: inv.condition || "N/A",
+	// 				specialHandling: specialHandlingParsed,
+	// 				arrivalDate: inv.createdAt.toISOString().split("T")[0],
+	// 			};
+	// 		})
+	// 	);
+	// }
+
+	async getInventoryByWarehouseFormatted(warehouseId: string, page = 1, limit = 10) {
 		if (!warehouseId) {
 			throw new Error("warehouseId is required");
 		}
 
+		const skip = (page - 1) * limit;
+
+		// Count total inventories
+		const total = await this.prisma.inventory.count({
+			where: { warehouseId },
+		});
+
+		// Paginated fetch
 		const inventories = await this.prisma.inventory.findMany({
 			where: { warehouseId },
 			orderBy: { createdAt: "desc" },
+			skip,
+			take: limit,
 			include: {
 				warehouse: true,
 			},
 		});
 
-		return await Promise.all(
+		const formatted = await Promise.all(
 			inventories.map(async (inv) => {
 				// 🔹 Safe parse for specialHandling
 				let specialHandlingParsed: any = null;
@@ -770,31 +856,26 @@ export class InventoryService {
 					}
 				}
 
-				// 🔹 Fetch Rack and Bin names if IDs exist
-				let rackName = "N/A";
-				let binName = "N/A";
+				// 🔹 Fetch Rack & Bin names
+				const rack = inv.rackId
+					? await this.prisma.rack.findUnique({
+							where: { id: inv.rackId },
+							select: { name: true },
+					  })
+					: null;
 
-				if (inv.rackId) {
-					const rack = await this.prisma.rack.findUnique({
-						where: { id: inv.rackId },
-						select: { name: true },
-					});
-					rackName = rack?.name || "N/A";
-				}
-
-				if (inv.binId) {
-					const bin = await this.prisma.bin.findUnique({
-						where: { id: inv.binId },
-						select: { name: true },
-					});
-					binName = bin?.name || "N/A";
-				}
+				const bin = inv.binId
+					? await this.prisma.bin.findUnique({
+							where: { id: inv.binId },
+							select: { name: true },
+					  })
+					: null;
 
 				return {
 					clientName: inv.clientName || "N/A",
 					shipmentId: inv.shipmentId || "N/A",
-					rack: rackName,
-					bin: binName,
+					rack: rack?.name || "N/A",
+					bin: bin?.name || "N/A",
 					status: inv.status || "N/A",
 					condition: inv.condition || "N/A",
 					specialHandling: specialHandlingParsed,
@@ -802,6 +883,16 @@ export class InventoryService {
 				};
 			})
 		);
+
+		return {
+			data: formatted,
+			meta: {
+				total,
+				page,
+				limit,
+				totalPages: Math.ceil(total / limit),
+			},
+		};
 	}
 
 	/**
