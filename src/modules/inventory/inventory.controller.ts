@@ -47,7 +47,7 @@ export class InventoryController {
 			},
 		},
 	})
-	async createInventory(@Body() dto: CreateInventoryDto, @Req() req: any) {
+	async createInventory(@Body() dto: any, @Req() req: any) {
 		const createdBy = req.user?.id || req.user?.sub;
 		return this.svc.createInventory(dto, createdBy);
 	}
