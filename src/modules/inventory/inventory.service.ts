@@ -128,8 +128,9 @@ export class InventoryService {
 				status: ShipmentStatus.ACCEPTED,
 				createdBy: userId,
 				customerId: userId,
+				deliveryDate: dto.deliveryDate ? new Date(dto.deliveryDate) : null,
 
-				pickupMode: "",
+				pickupMode: dto.pickupMode as any,
 				serviceType: "",
 				baseFrieght: 0.0,
 				handlingFee: 0.0,
@@ -161,7 +162,7 @@ export class InventoryService {
 				trackingNumber: createdShipment.orderId,
 				origin: originText,
 				destination: destinationText,
-				estimatedDelivery: this.prettyDate(createdShipment.pickupDate ?? dto.pickupDate),
+				estimatedDelivery: this.prettyDate(createdShipment.deliveryDate ?? dto.deliveryDate),
 				status: "Accepted",
 				trackingUrl: `${this.urlService.normalizePrefix()}`,
 			});

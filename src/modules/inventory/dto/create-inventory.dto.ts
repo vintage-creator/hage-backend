@@ -71,6 +71,20 @@ export class CreateInventoryDto {
 	binId?: string;
 
 	@ApiPropertyOptional({
+		description: "Pickup date for the item (ISO string)",
+		example: "2025-12-01T10:00:00.000Z",
+	})
+	@IsOptional()
+	deliveryDate?: string;
+
+	@ApiPropertyOptional({
+		description: "Pickup mode",
+		example: "sea",
+	})
+	@IsOptional()
+	pickupMode?: string;
+
+	@ApiPropertyOptional({
 		description: "Zone inside the warehouse",
 		example: "zoneid",
 	})
