@@ -100,7 +100,7 @@ export class ShipmentsController {
 		return this.svc.create(dto, userId, files);
 	}
 
-	// ✅ GENERATE TRACKING ID
+	// GENERATE TRACKING ID
 	@Get("generate-tracking")
 	@UseGuards(JwtAuthGuard)
 	@ApiBearerAuth("access-token")
@@ -108,11 +108,12 @@ export class ShipmentsController {
 		summary: "Generate a new shipment tracking number",
 		description: "Generates a unique tracking number for use when creating shipments.",
 	})
-	generateTracking() {
-		return { trackingNumber: this.svc.generateOrderTrackingId() };
+	async generateTracking() {
+		const trackingNumber = await this.svc.generateOrderTrackingId();
+		return { trackingNumber };
 	}
 
-	// ✅ ASSIGN SHIPMENT
+	// ASSIGN SHIPMENT
 	@ApiParam({
 		name: "id",
 		description: "Shipment ID",

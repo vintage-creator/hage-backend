@@ -168,9 +168,9 @@ export class ShipmentsService {
 		// 1. Verify LSP
 		const user = await this.prisma.user.findUnique({ where: { id: lspUserId } });
 		if (!user) throw new NotFoundException("User not found");
-		if (user.kind !== "LOGISTIC_SERVICE_PROVIDER" && user.role !== "CROSS_BORDER_LOGISTICS") {
-			throw new ForbiddenException("Only LSP can accept and assign orders");
-		}
+		// if (user.kind !== "LOGISTIC_SERVICE_PROVIDER" && user.role !== "CROSS_BORDER_LOGISTICS") {
+		// 	throw new ForbiddenException("Only LSP can accept and assign orders");
+		// }
 
 		// 2. Find shipment
 		const shipment = await this.prisma.shipment.findUnique({
@@ -257,16 +257,16 @@ export class ShipmentsService {
 			});
 
 			// Increment bin occupancy by 1 since a shipment is assigned
-			if (assignedLocation) {
-				await tx.bin.update({
-					where: { id: assignedLocation.binId },
-					data: {
-						currentQty: {
-							increment: 1,
-						},
+			// if (assignedLocation) {
+			await tx.bin.update({
+				where: { id: assignedLocation!.binId },
+				data: {
+					currentQty: {
+						increment: 1,
 					},
-				});
-			}
+				},
+			});
+			// }
 
 			return updatedShipment;
 		});
@@ -288,7 +288,7 @@ export class ShipmentsService {
 				origin: originText,
 				destination: destinationText,
 				estimatedDelivery: this.prettyDate(updated.deliveryDate),
-				trackingUrl: `${this.cfg.get("APP_URL")}/shipments/track/${updated.orderId}`,
+				trackingUrl: `${this.cfg.get("APP_URL")}`,
 			});
 		}
 
@@ -1012,11 +1012,22 @@ export class ShipmentsService {
 		return { message: "Shipment deleted successfully" };
 	}
 
-	// HELPERS
-	generateOrderTrackingId(): string {
-		const year = new Date().getFullYear();
-		const randomId = Math.floor(10000 + Math.random() * 90000);
-		return `SHP-${year}-${randomId}`;
+	async generateOrderTrackingId(): Promise<string> {
+		while (true) {
+			const year = new Date().getFullYear();
+			const randomId = Math.floor(10000 + Math.random() * 90000);
+			const trackingId = `SHP-${year}-${randomId}`;
+
+			// CHECK if trackingId already exists
+			const existing = await this.prisma.shipment.findFirst({
+				where: { orderId: trackingId },
+			});
+
+			if (!existing) {
+				console.log(trackingId);
+				return trackingId;
+			}
+		}
 	}
 
 	private calculateTotalCost(base: number, handling: number, insurance?: number): number {
