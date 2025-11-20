@@ -9,6 +9,7 @@ import { ShipmentsModule } from "./modules/shipments/shipments.module";
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { WarehousesModule } from "./modules/warehouses/warehouses.module";
 import { InventoryModule } from "./modules/inventory/inventory.module";
+import { ProfileModule } from './modules/profile/profile.module';
 
 
 @Module({
@@ -19,7 +20,8 @@ import { InventoryModule } from "./modules/inventory/inventory.module";
     ShipmentsModule,
     NotificationsModule,
     WarehousesModule,
-    InventoryModule
+    InventoryModule,
+    ProfileModule
   ],
   controllers: [],
   providers: [],

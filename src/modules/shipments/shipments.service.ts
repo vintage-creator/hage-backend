@@ -374,7 +374,10 @@ export class ShipmentsService {
 		return updated;
 	}
 
-	// MAIN FIND ALL WITH ROLE-BASED ACCESS CONTROL
+	/**
+	 * Get all shipments with optional status filtering
+	 * Status filters: "new_orders", "pending", "in_warehouse", or return all without filter
+	 */
 	async findAll(filters: FilterShipmentDto, userId: string) {
 		// Get user details to determine access level
 		const user = await this.prisma.user.findUnique({
@@ -384,7 +387,7 @@ export class ShipmentsService {
 
 		if (!user) throw new ForbiddenException("User not found");
 
-		const { page = 1, limit = 20, ...filterCriteria } = filters;
+		const { page = 1, limit = 20, statusFilter, ...filterCriteria } = filters;
 		const skip = (page - 1) * limit;
 
 		// Base where clause
@@ -393,34 +396,104 @@ export class ShipmentsService {
 		// ROLE-BASED FILTERING
 		if (user.kind === "LOGISTIC_SERVICE_PROVIDER" || user.role === "CROSS_BORDER_LOGISTICS") {
 			where.createdBy = userId;
-			// LSP and Cross-Border Logistics can see ALL shipments
-			// No additional filter needed - they have full access
 			this.logger.log(`LSP/Admin ${userId} accessing all shipments`);
 		} else if (user.role === "TRANSPORTER") {
-			// Transporters can only see shipments assigned to them
 			where.createdBy = userId;
 			this.logger.log(`Transporter ${userId} accessing assigned shipments`);
 		} else if (user.role === "LAST_MILE_PROVIDER") {
-			// Last mile providers can see shipments assigned to them
 			where.createdBy = userId;
 			this.logger.log(`Last mile provider ${userId} accessing assigned shipments`);
 		} else if (user.kind === "ENTERPRISE" || user.kind === "DISTRIBUTOR") {
-			// Enterprises and Distributors can only see shipments they created
 			where.createdBy = userId;
 			this.logger.log(`Enterprise/Distributor ${userId} accessing their shipments`);
 		} else if (user.kind === "END_USER") {
-			// End users can only see shipments where they are the customer
 			where.createdBy = userId;
 			this.logger.log(`End user ${userId} accessing their shipments`);
 		} else {
-			// Unknown role - deny access
 			throw new ForbiddenException("You do not have permission to view shipments");
 		}
 
-		// Apply additional filters from query parameters
-		if (filterCriteria.status) {
-			where.status = filterCriteria.status;
+		// ENHANCED STATUS FILTERING
+		// Map friendly status filters to actual shipment statuses
+		if (statusFilter) {
+			switch (statusFilter.toLowerCase()) {
+				case "new_orders":
+					// Return newest shipments (NO STATUS FILTER)
+					// Just break and let orderBy(createdAt DESC) do its work
+					break;
+
+				case "new":
+					where.status = ShipmentStatus.PENDING_ACCEPTANCE;
+					break;
+
+				case "pending":
+					where.status = ShipmentStatus.PENDING_ACCEPTANCE;
+					break;
+
+				case "in_warehouse":
+				case "warehouse":
+					where.status = ShipmentStatus.ACCEPTED;
+					where.assignedWarehouseId = { not: null };
+					break;
+
+				case "in_transit":
+					where.status = ShipmentStatus.IN_TRANSIT;
+					break;
+
+				case "completed":
+					where.status = ShipmentStatus.COMPLETED;
+					break;
+
+				case "cancelled":
+					where.status = ShipmentStatus.CANCELLED;
+					break;
+
+				default:
+					this.logger.warn(`Invalid status filter: ${statusFilter}`);
+					break;
+			}
 		}
+
+		// // Apply additional filters from query parameters
+		// if (filterCriteria.status) {
+		// 	// normalize both statusFilter and filterCriteria.status
+		// 	const s = filterCriteria.status.toLowerCase();
+
+		// 	switch (s) {
+		// 		case "new_orders":
+		// 		case "new":
+		// 			where.status = ShipmentStatus.PENDING_ACCEPTANCE;
+		// 			break;
+
+		// 		case "pending":
+		// 			where.status = {
+		// 				in: [ShipmentStatus.ACCEPTED, ShipmentStatus.EN_ROUTE_TO_PICKUP, ShipmentStatus.PICKED_UP],
+		// 			};
+		// 			break;
+
+		// 		case "in_warehouse":
+		// 		case "warehouse":
+		// 			where.status = ShipmentStatus.ACCEPTED;
+		// 			where.assignedWarehouseId = { not: null };
+		// 			break;
+
+		// 		case "in_transit":
+		// 			where.status = ShipmentStatus.IN_TRANSIT;
+		// 			break;
+
+		// 		case "completed":
+		// 			where.status = ShipmentStatus.COMPLETED;
+		// 			break;
+
+		// 		case "cancelled":
+		// 			where.status = ShipmentStatus.CANCELLED;
+		// 			break;
+
+		// 		default:
+		// 			this.logger.warn(`Invalid status: ${filterCriteria.status}`);
+		// 			break;
+		// 	}
+		// }
 
 		if (filterCriteria.orderId) {
 			where.orderId = { contains: filterCriteria.orderId, mode: "insensitive" };
@@ -447,7 +520,22 @@ export class ShipmentsService {
 			};
 		}
 
-		// Execute query
+		// Date range filters (optional enhancement)
+		if (filterCriteria.startDate) {
+			where.createdAt = {
+				...where.createdAt,
+				gte: new Date(filterCriteria.startDate),
+			};
+		}
+
+		if (filterCriteria.endDate) {
+			where.createdAt = {
+				...where.createdAt,
+				lte: new Date(filterCriteria.endDate),
+			};
+		}
+
+		// Execute query with detailed includes
 		const [shipments, total] = await Promise.all([
 			this.prisma.shipment.findMany({
 				where,
@@ -476,6 +564,26 @@ export class ShipmentsService {
 							address: true,
 						},
 					},
+					zone: {
+						select: {
+							id: true,
+							name: true,
+						},
+					},
+					rack: {
+						select: {
+							id: true,
+							name: true,
+						},
+					},
+					bin: {
+						select: {
+							id: true,
+							name: true,
+							currentQty: true,
+							capacity: true,
+						},
+					},
 					documents: {
 						select: {
 							id: true,
@@ -498,17 +606,13 @@ export class ShipmentsService {
 		]);
 
 		return {
+			success: true,
 			data: shipments,
 			pagination: {
 				total,
 				page,
 				limit,
 				totalPages: Math.ceil(total / limit),
-			},
-			meta: {
-				userRole: user.kind,
-				userRoleType: user.role,
-				accessLevel: this.getAccessLevel(user.kind, user.role),
 			},
 		};
 	}

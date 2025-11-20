@@ -78,6 +78,7 @@ model User {
   email      String?   @unique
   phone      String?   @unique
   password   String?
+  profilePicture  String?
   kind       UserKind
   role       RoleType?
   companyId  String?

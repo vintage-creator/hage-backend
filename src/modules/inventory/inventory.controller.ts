@@ -160,14 +160,14 @@ export class InventoryController {
 	}
 
 	@Patch("locations/:id/status")
-	@ApiParam({ name: "id", description: "Inventory Location ID" })
+	@ApiParam({ name: "id", description: "Inventory ID" })
 	@ApiOperation({
-		summary: "Update inventory location status",
+		summary: "Update inventory status",
 		description: "Update status through the lifecycle: AVAILABLE → RESERVED → etc.",
 	})
 	async updateInventoryLocationStatus(@Param("id") id: string, @Body() body: { status: InventoryLocationStatus; note?: string }, @Req() req: any) {
 		const updatedBy = req.user?.id || req.user?.sub;
-		return this.svc.updateInventoryLocationStatus(id, body.status, updatedBy, body.note);
+		return this.svc.updateInventoryStatus(id, body.status, updatedBy, body.note);
 	}
 
 	@Delete("locations/:id")

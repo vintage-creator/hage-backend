@@ -1,5 +1,5 @@
 // src/modules/shipments/shipments.controller.ts
-import { Controller, Post, Body, Get, Param, Patch, Delete, UseGuards, UseInterceptors, UploadedFiles, Req, Query } from "@nestjs/common";
+import { Controller, Post, Body, Get, Param, Patch, Delete, UseGuards, UseInterceptors, UploadedFiles, Req, Query, HttpCode, HttpStatus } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags, ApiConsumes, ApiBody, ApiResponse, ApiQuery, ApiParam, ApiOperation } from "@nestjs/swagger";
 import { FilesInterceptor } from "@nestjs/platform-express";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
@@ -8,7 +8,7 @@ import { CreateShipmentDto } from "./dto/create-shipment.dto";
 import { UpdateShipmentDto } from "./dto/update-shipment.dto";
 import { Request } from "express";
 import { AssignShipmentDto } from "./dto/assign-shipment.dto";
-import { FilterShipmentDto } from "./dto/filter-shipment.dto";
+import { FilterShipmentDto, StatusFilterEnum } from "./dto/filter-shipment.dto";
 import { UpdateStatusDto } from "./dto/update-status.dto";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
@@ -154,20 +154,102 @@ export class ShipmentsController {
 	}
 
 	// ✅ GET ALL SHIPMENTS
+	/**
+	 * Get all shipments with optional filtering
+	 * Supports filtering by: new_orders, pending, in_warehouse, or no filter (all)
+	 */
 	@Get()
+	@HttpCode(HttpStatus.OK)
 	@UseGuards(JwtAuthGuard)
 	@ApiBearerAuth("access-token")
 	@ApiOperation({
-		summary: "List all shipments",
-		description: "Fetches all shipments belonging to the authenticated user. Can be filtered by status (e.g., PENDING_ACCEPTANCE, ACCEPTED, EN_ROUTE_TO_PICKUP, PICKED_UP, IN_TRANSIT, ARRIVED_AT_DESTINATION, COMPLETED, CANCELLED).",
+		summary: "Get all shipments with optional status filtering",
+		description: `
+      Retrieve shipments based on user role and optional filters.
+      
+      **Status Filters:**
+      - new_orders: Shipments pending acceptance
+      - pending: Accepted, en route, or picked up shipments
+      - in_warehouse: Shipments arrived at warehouse
+      - in_transit: Shipments currently in transit
+      - completed: Delivered shipments
+      - cancelled: Cancelled shipments
+      - all (or no filter): All shipments
+      
+      **Access Control:**
+      - LSP: Can view all shipments
+      - Transporter: Only assigned shipments
+      - Enterprise/Distributor: Only created shipments
+      - End User: Only their customer shipments
+    `,
+	})
+	@ApiResponse({
+		status: 200,
+		description: "Shipments retrieved successfully",
+		schema: {
+			example: {
+				success: true,
+				data: [
+					{
+						id: "uuid",
+						orderId: "SHP-2025-12345",
+						clientName: "John Doe",
+						status: "PENDING_ACCEPTANCE",
+						cargoType: "Electronics",
+						weight: 100,
+						origin: { country: "Nigeria", city: "Lagos" },
+						destination: { country: "Ghana", city: "Accra" },
+						createdAt: "2025-01-15T10:00:00Z",
+					},
+				],
+				pagination: {
+					total: 50,
+					page: 1,
+					limit: 20,
+					totalPages: 3,
+				},
+				summary: {
+					newOrders: 10,
+					pending: 15,
+					inWarehouse: 8,
+					inTransit: 12,
+					completed: 3,
+					cancelled: 2,
+				},
+				meta: {
+					userRole: "LOGISTIC_SERVICE_PROVIDER",
+					userRoleType: "CROSS_BORDER_LOGISTICS",
+					accessLevel: "full_access",
+					appliedFilters: {
+						statusFilter: "new_orders",
+					},
+				},
+			},
+		},
 	})
 	@ApiQuery({
-		name: "status",
+		name: "statusFilter",
 		required: false,
-		description: "Filter shipments by status (e.g., PENDING_ACCEPTANCE, ACCEPTED, EN_ROUTE_TO_PICKUP, PICKED_UP)",
+		enum: StatusFilterEnum,
+		description: "Filter shipments by status category",
 	})
-	async findAll(@Query() filters: FilterShipmentDto, @Req() req: any) {
-		return this.svc.findAll(filters, req.user.id);
+	@ApiQuery({
+		name: "page",
+		required: false,
+		type: Number,
+		example: 1,
+		description: "Page number",
+	})
+	@ApiQuery({
+		name: "limit",
+		required: false,
+		type: Number,
+		example: 20,
+		description: "Items per page",
+	})
+	async getAllShipments(@Query() filters: FilterShipmentDto, @Req() req: any) {
+		const userId = req.user.sub || req.user.id;
+		return this.svc.findAll(filters, userId);
 	}
 
 	// ✅ TRANSPORTER'S SHIPMENTS

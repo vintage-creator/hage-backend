@@ -743,14 +743,14 @@ export class InventoryService {
 	 * NEW: Update inventory location status with audit trail
 	 * Requirement: Status updates (Arrival → Storage → Picking → Packing → Ready for Dispatch → Dispatch)
 	 */
-	async updateInventoryLocationStatus(id: string, status: InventoryLocationStatus, updatedBy?: string, note?: string) {
-		const loc = await this.prisma.inventoryLocation.findUnique({
+	async updateInventoryStatus(id: string, status: string, updatedBy?: string, note?: string) {
+		const loc = await this.prisma.inventory.findUnique({
 			where: { id },
 		});
 
-		if (!loc) throw new NotFoundException("InventoryLocation not found");
+		if (!loc) throw new NotFoundException("Inventory not found");
 
-		return this.prisma.inventoryLocation.update({
+		return this.prisma.inventory.update({
 			where: { id },
 			data: {
 				status,
