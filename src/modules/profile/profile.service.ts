@@ -103,7 +103,7 @@ export class ProfileService {
 			// Delete old profile picture if it exists
 			if (user.profilePicture) {
 				try {
-					await this.storage.deleteFile(user.profilePicture);
+					await this.storage.delete?.(user.profilePicture);
 				} catch (deleteErr) {
 					this.logger.warn(`Failed to delete old profile picture: ${(deleteErr as any)?.message ?? deleteErr}`);
 				}
