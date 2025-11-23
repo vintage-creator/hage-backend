@@ -1,0 +1,28 @@
+<mjml>
+  <mj-body background-color="#f9fafb" width="600px">
+    <mj-section background-color="#ffffff" padding="24px" border-radius="8px">
+      <mj-column>
+        <mj-text font-size="20px" font-weight="700">
+          New Marketplace Waitlist Signup
+        </mj-text>
+
+        <mj-text font-size="16px" color="#374151" padding-top="12px">
+          A new user has joined the Hage Marketplace waitlist.
+        </mj-text>
+
+        <mj-text font-size="14px" color="#374151" padding-top="12px">
+          <strong>Full Name:</strong> {{fullName}}<br/>
+          <strong>Email:</strong> {{email}}<br/>
+          <strong>Country:</strong> {{country}}<br/>
+          <strong>Industry:</strong> {{industry}}
+        </mj-text>
+
+        <mj-divider border-color="#E5E7EB" padding="20px 0" />
+
+        <mj-text font-size="12px" color="#9CA3AF">
+          © {{year}} {{appName}}
+        </mj-text>
+      </mj-column>
+    </mj-section>
+  </mj-body>
+</mjml>

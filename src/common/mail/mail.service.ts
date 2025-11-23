@@ -171,4 +171,9 @@ export class MailService {
     const subject = `${this.cfg.get("APP_NAME")}: Shipment ${context.trackingNumber} status updated`;
     return this.sendFromTemplate(email, subject, "shipment-status-update", context);
   }
+
+  async sendWaitlistAdminNotification(to: string, context: any) {
+    const subject = `${this.cfg.get("APP_NAME")}: New Marketplace Waitlist Entry`;
+    return this.sendFromTemplate(to, subject, "join-waitlist", context);
+  }  
 }

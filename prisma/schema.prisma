@@ -26,10 +26,11 @@ enum RoleType {
 }
 
 enum WarehouseStatus {
-  ACTIVE
-  INACTIVE
-  RESTRICTED
-  MAINTENANCE
+  ARRIVAL
+  IN_STORAGE
+  PICKING
+  PACKING
+  READY_TO_DISPATCH
 }
 
 enum InventoryLocationStatus {
@@ -170,7 +171,7 @@ model Warehouse {
   address       String
   totalCapacity Int // capacity measured in "capacityUnit"
   capacityUnit  String          @default("pieces")
-  status        WarehouseStatus @default(ACTIVE)
+  status        WarehouseStatus @default(ARRIVAL)
 
   numZones       Int?
   numRows        Int?
@@ -458,4 +459,13 @@ model Notification {
   user User @relation(fields: [userId], references: [id])
 
   @@index([userId, read])
+}
+
+model MarketplaceWaitlist {
+  id        String   @id @default(uuid())
+  fullName  String
+  email     String   @unique
+  country   String
+  industry  String
+  createdAt DateTime @default(now())
 }

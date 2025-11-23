@@ -23,9 +23,11 @@ import {
   ApiParam,
   ApiBody,
   ApiQuery,
+  ApiConsumes
 } from "@nestjs/swagger";
 import { WarehousesService } from "./warehouses.service";
 import { CreateWarehouseDto } from "./dto/create-warehouse.dto";
+import { WarehouseStatus } from '@prisma/client';
 import { CreateZoneDto } from "./dto/create-zone.dto";
 import { CreateRackDto } from "./dto/create-rack.dto";
 import { CreateBinDto } from "./dto/create-bin.dto";
@@ -68,7 +70,6 @@ export class WarehousesController {
     return this.svc.listWarehouses(companyId, p, pp);
   }
 
-  // Specific routes first to avoid ambiguity with :id
   @Get(":id/capacity")
   @ApiParam({ name: "id", description: "Warehouse id" })
   @ApiOperation({
@@ -119,7 +120,6 @@ export class WarehousesController {
     return this.svc.getBinAvailability(binId);
   }
 
-  // generic: placed after more-specific routes
   @Get(":id")
   @ApiParam({ name: "id", description: "Warehouse id" })
   @ApiOperation({
@@ -128,10 +128,113 @@ export class WarehousesController {
   async get(@Param("id") id: string): Promise<any> {
     return this.svc.getWarehouse(id);
   }
-
   @Patch(":id")
   @ApiParam({ name: "id", description: "Warehouse id" })
   @ApiOperation({ summary: "Update warehouse" })
+  @ApiConsumes("application/x-www-form-urlencoded")
+  @ApiBody({
+    schema: {
+      type: "object",
+      properties: {
+        name: { 
+          type: "string", 
+          title: "Warehouse Name",
+          description: "The official name of the warehouse.",
+          example: "Main Distribution Center" 
+        },
+        country: { 
+          type: "string",
+          title: "Country",
+          description: "Country where the warehouse is located.",
+          example: "Nigeria"
+        },
+        city: { 
+          type: "string",
+          title: "City",
+          description: "City where the warehouse operates.",
+          example: "Lagos" 
+        },
+        address: { 
+          type: "string",
+          title: "Full Address",
+          description: "Warehouse street address.",
+          example: "42 Industrial Layout, Ikeja"
+        },
+        totalCapacity: { 
+          type: "integer",
+          minimum: 0,
+          title: "Total Capacity",
+          description: "Maximum storage capacity of the warehouse.",
+          example: 1500
+        },
+        capacityUnit: { 
+          type: "string",
+          title: "Capacity Unit",
+          description: "Unit of capacity measurement (e.g. Square Feet (sq ft), Square Meters (m²), Cubic Feet (cu ft), Cubic Meters (m³)).",
+          example: "sq ft"
+        },
+        status: {
+          type: "string",
+          title: "Warehouse Status",
+          description: "Operational state of the warehouse.",
+          enum: Object.values(WarehouseStatus),
+          example: "ARRIVAL"
+        },
+        numZones: { 
+          type: "integer",
+          minimum: 0,
+          title: "Number of Zones",
+          description: "How many storage zones the warehouse contains.",
+          example: 4
+        },
+        numRows: { 
+          type: "integer",
+          minimum: 0,
+          title: "Number of Rows",
+          description: "Total rows across all zones.",
+          example: 12
+        },
+        numRacks: { 
+          type: "integer",
+          minimum: 0,
+          title: "Number of Racks",
+          description: "Total racks available for storage.",
+          example: 50
+        },
+        numBinsPerRack: { 
+          type: "integer",
+          minimum: 0,
+          title: "Bins per Rack",
+          description: "Number of bins in each rack.",
+          example: 30
+        },
+        allowsTemperature: { 
+          type: "boolean",
+          title: "Temperature-Controlled",
+          description: "Whether the warehouse supports temperature-controlled storage.",
+          example: false
+        },
+        allowsHazardous: { 
+          type: "boolean",
+          title: "Hazardous Materials Allowed",
+          description: "Whether hazardous material storage is supported.",
+          example: false
+        },
+        allowsQuarantine: { 
+          type: "boolean",
+          title: "Quarantine Area Available",
+          description: "Whether the warehouse supports quarantine storage.",
+          example: false
+        },
+        allowsNone: { 
+          type: "boolean",
+          title: "No Special Requirements",
+          description: "If true, the warehouse has no special storage restrictions.",
+          example: true
+        },
+      },
+    },
+  })
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async update(
     @Param("id") id: string,

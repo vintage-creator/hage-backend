@@ -10,6 +10,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { WarehousesModule } from "./modules/warehouses/warehouses.module";
 import { InventoryModule } from "./modules/inventory/inventory.module";
 import { ProfileModule } from './modules/profile/profile.module';
+import { MarketplaceWaitlistModule } from "./modules/marketplace-waitlist/marketplace-waitlist.module";
 
 
 @Module({
@@ -21,7 +22,8 @@ import { ProfileModule } from './modules/profile/profile.module';
     NotificationsModule,
     WarehousesModule,
     InventoryModule,
-    ProfileModule
+    ProfileModule,
+    MarketplaceWaitlistModule
   ],
   controllers: [],
   providers: [],

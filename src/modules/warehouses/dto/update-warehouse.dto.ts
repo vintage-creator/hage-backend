@@ -1,6 +1,7 @@
 // src/modules/warehouses/dto/update-warehouse.dto.ts
-import { IsOptional, IsString, IsInt, Min, IsBoolean } from 'class-validator';
+import { IsOptional, IsString, IsInt, Min, IsBoolean, IsEnum } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import { WarehouseStatus } from '@prisma/client';
 
 export class UpdateWarehouseDto {
@@ -26,6 +27,7 @@ export class UpdateWarehouseDto {
 
   @ApiPropertyOptional({ type: 'integer', minimum: 0 })
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   totalCapacity?: number;
@@ -35,52 +37,60 @@ export class UpdateWarehouseDto {
   @IsString()
   capacityUnit?: string;
 
-  @ApiPropertyOptional({ enum: WarehouseStatus })
+  @ApiPropertyOptional({ enum: WarehouseStatus, description: 'Warehouse lifecycle status' })
   @IsOptional()
-  @IsString()
-  status?: string;
+  @IsEnum(WarehouseStatus)
+  status?: WarehouseStatus;
 
   @ApiPropertyOptional({ type: 'integer', minimum: 0 })
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   numZones?: number;
 
   @ApiPropertyOptional({ type: 'integer', minimum: 0 })
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   numRows?: number;
 
   @ApiPropertyOptional({ type: 'integer', minimum: 0 })
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   numRacks?: number;
 
   @ApiPropertyOptional({ type: 'integer', minimum: 0 })
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   numBinsPerRack?: number;
 
   @ApiPropertyOptional({ description: 'Allows temperature control' })
   @IsOptional()
+  @Type(() => Boolean)
   @IsBoolean()
   allowsTemperature?: boolean;
 
   @ApiPropertyOptional({ description: 'Allows storing hazardous items' })
   @IsOptional()
+  @Type(() => Boolean)
   @IsBoolean()
   allowsHazardous?: boolean;
 
   @ApiPropertyOptional({ description: 'Allows quarantine storage' })
   @IsOptional()
+  @Type(() => Boolean)
   @IsBoolean()
   allowsQuarantine?: boolean;
 
   @ApiPropertyOptional({ example: true, description: 'Warehouse has no special condition' })
   @IsOptional()
+  @Type(() => Boolean)
   @IsBoolean()
   allowsNone?: boolean;
 }
