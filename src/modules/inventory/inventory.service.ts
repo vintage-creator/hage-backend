@@ -872,6 +872,7 @@ export class InventoryService {
 					: null;
 
 				return {
+					inventoryId: inv.id,
 					clientName: inv.clientName || "N/A",
 					shipmentId: inv.shipmentId || "N/A",
 					rack: rack?.name || "N/A",
