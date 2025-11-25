@@ -127,7 +127,7 @@ export class InventoryService {
 				origin: normalizedOrigin,
 				destination: normalizedDestination,
 				pickupDate: dto.pickupDate ? new Date(dto.pickupDate) : null,
-				status: ShipmentStatus.ACCEPTED,
+				status: ShipmentStatus.PENDING as any,
 				createdBy: userId,
 				customerId: userId,
 				deliveryDate: dto.deliveryDate ? new Date(dto.deliveryDate) : null,
@@ -154,7 +154,7 @@ export class InventoryService {
 		await this.prisma.shipmentStatusHistory.create({
 			data: {
 				shipmentId: createdShipment.id,
-				status: ShipmentStatus.ACCEPTED,
+				status: ShipmentStatus.PENDING as any,
 				updatedBy: userId,
 			},
 		});

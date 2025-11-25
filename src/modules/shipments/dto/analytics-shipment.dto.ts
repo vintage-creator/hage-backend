@@ -9,14 +9,14 @@ export class AnalyticsResponseDto {
 		totalMinutes: number;
 	};
 	totalShipments!: number;
-	byStatus!: {
-		pending: number;
-		accepted: number;
-		inTransit: number;
-		completed: number;
-		cancelled: number;
-		delayed: number;
-	};
+	// byStatus!: {
+	// 	pending: number;
+	// 	accepted: number;
+	// 	inTransit: number;
+	// 	completed: number;
+	// 	cancelled: number;
+	// 	delayed: number;
+	// };
 	recentActivity!: Array<{
 		shipmentId: string;
 		orderId: string;

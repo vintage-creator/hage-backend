@@ -362,7 +362,7 @@ model Shipment {
   totalCost    Float
 
   // STATUS & ASSIGNMENT
-  status                ShipmentStatus @default(PENDING_ACCEPTANCE)
+  status                ShipmentStatus @default(NEW_ORDER)
   assignedTransporterId String?
   assignedWarehouseId   String?
   assignedZoneId        String?

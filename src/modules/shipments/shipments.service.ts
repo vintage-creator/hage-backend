@@ -84,7 +84,7 @@ export class ShipmentsService {
 			const normalizedDestination = this.safeParseLocation(dto.destination);
 
 			// Create shipment + documents in transaction
-			const shipment = await this.prisma.$transaction(async (tx) => {
+			const shipment = await this.prisma.$transaction(async (tx: any) => {
 				const createdShipment = await tx.shipment.create({
 					data: {
 						orderId: dto.orderId ?? this.generateOrderTrackingId(),
@@ -105,7 +105,7 @@ export class ShipmentsService {
 						handlingFee: sanitizeNumber(dto.handlingFee),
 						insuranceFee: sanitizeNumber(dto.insuranceFee),
 						totalCost: sanitizeNumber(dto.baseFrieght) + sanitizeNumber(dto.handlingFee) + sanitizeNumber(dto.insuranceFee),
-						status: "PENDING_ACCEPTANCE",
+						status: ShipmentStatus.NEW_ORDER as any,
 						createdBy: lspUserId,
 						customerId: lspUserId,
 					},
@@ -114,7 +114,7 @@ export class ShipmentsService {
 				await tx.shipmentStatusHistory.create({
 					data: {
 						shipmentId: createdShipment.id,
-						status: ShipmentStatus.PENDING_ACCEPTANCE as any,
+						status: ShipmentStatus.NEW_ORDER as any,
 						updatedBy: lspUserId,
 					},
 				});
@@ -146,7 +146,7 @@ export class ShipmentsService {
 					origin: originText,
 					destination: destinationText,
 					estimatedDelivery: this.prettyDate(shipment.deliveryDate ?? dto.deliveryDate),
-					status: "Pending Acceptance",
+					status: ShipmentStatus.NEW_ORDER,
 					trackingUrl: `${this.urlService.normalizePrefix()}`,
 				});
 			}
@@ -177,7 +177,7 @@ export class ShipmentsService {
 			where: { id: shipmentId },
 		});
 		if (!shipment) throw new NotFoundException("Shipment not found");
-		if (shipment.status !== (ShipmentStatus.PENDING_ACCEPTANCE as any)) {
+		if (shipment.status !== (ShipmentStatus.NEW_ORDER as any)) {
 			throw new BadRequestException("Shipment already accepted or not pending");
 		}
 
@@ -230,12 +230,12 @@ export class ShipmentsService {
 		}
 
 		// 6. Perform transaction
-		const updated = await this.prisma.$transaction(async (tx) => {
+		const updated = await this.prisma.$transaction(async (tx: any) => {
 			// Update shipment
 			const updatedShipment = await tx.shipment.update({
 				where: { id: shipmentId },
 				data: {
-					status: ShipmentStatus.ACCEPTED as any,
+					status: ShipmentStatus.PENDING as any,
 					assignedTransporterId: dto.transporterId,
 					assignedWarehouseId: dto.warehouseId,
 					assignedZoneId: assignedLocation?.zoneId || null,
@@ -251,7 +251,7 @@ export class ShipmentsService {
 			await tx.shipmentStatusHistory.create({
 				data: {
 					shipmentId,
-					status: ShipmentStatus.ACCEPTED as any,
+					status: ShipmentStatus.PENDING as any,
 					updatedBy: lspUserId,
 				},
 			});
@@ -307,33 +307,20 @@ export class ShipmentsService {
 		const user = await this.prisma.user.findUnique({
 			where: { id: updatedBy },
 		});
+
 		if (!user) throw new NotFoundException("User not found");
 
-		// PERMISSION CHECK (unchanged)
-		if (dto.status === ShipmentStatus.ACCEPTED) {
-			if (user.kind !== "LOGISTIC_SERVICE_PROVIDER") throw new ForbiddenException("Only LSP can accept orders");
-		} else if (dto.status === ShipmentStatus.PICKED_UP) {
-			if (shipment.assignedTransporterId !== updatedBy) throw new ForbiddenException("Only assigned transporter can update to picked up");
-		} else if (dto.status === ShipmentStatus.CANCELLED) {
-			if (user.kind !== "LOGISTIC_SERVICE_PROVIDER" || shipment.createdBy == user.id) {
-				throw new ForbiddenException("Only LSP and order creator can cancel orders");
-			}
-		} else if ([ShipmentStatus.EN_ROUTE_TO_PICKUP, ShipmentStatus.IN_TRANSIT].includes(dto.status)) {
-			if (user.kind !== "LOGISTIC_SERVICE_PROVIDER" && shipment.assignedTransporterId !== updatedBy) {
-				throw new ForbiddenException("Not authorized to update this status");
-			}
-		} else if (dto.status === ShipmentStatus.COMPLETED) {
-			if (user.kind !== "LOGISTIC_SERVICE_PROVIDER" && user.role !== "LAST_MILE_PROVIDER") {
-				throw new ForbiddenException("Only LSP or last mile provider can complete orders");
-			}
-		}
+		// --------------------------------------------
+		// Validate transition (no backward movement)
+		// --------------------------------------------
+		this.validateStatusTransition(shipment.status as ShipmentStatus, dto.status);
 
-		this.validateStatusTransition(shipment.status, dto.status);
-
-		const updated = await this.prisma.$transaction(async (tx) => {
+		const updated = await this.prisma.$transaction(async (tx: any) => {
 			const updatedShipment = await tx.shipment.update({
 				where: { id: shipmentId },
-				data: { status: dto.status as any },
+				data: {
+					status: dto.status as any,
+				},
 				include: { transporter: true, warehouse: true, documents: true },
 			});
 
@@ -349,26 +336,9 @@ export class ShipmentsService {
 			return updatedShipment;
 		});
 
-		const majorStatuses = [ShipmentStatus.PICKED_UP, ShipmentStatus.IN_TRANSIT, ShipmentStatus.ARRIVED_AT_DESTINATION, ShipmentStatus.COMPLETED];
-
-		if (majorStatuses.includes(dto.status) && updated.email) {
-			const originObj = this.safeParseLocation(updated.origin ?? shipment.origin);
-			const destinationObj = this.safeParseLocation(updated.destination ?? shipment.destination);
-			const originText = this.formatLocationText(originObj);
-			const destinationText = this.formatLocationText(destinationObj);
-
-			await this.mailer.sendShipmentStatusUpdate(updated.email, {
-				clientName: updated.clientName,
-				trackingNumber: updated.orderId,
-				status: this.formatStatusForDisplay(dto.status),
-				origin: originText,
-				destination: destinationText,
-				estimatedDelivery: this.prettyDate(updated.deliveryDate),
-				trackingUrl: `${this.cfg.get("APP_URL")}/shipments/track/${updated.orderId}`,
-			});
-		}
-
-		// Create Notifications using updated info
+		// --------------------------------------------
+		// Notifications (based on new statuses)
+		// --------------------------------------------
 		await Promise.all([this.createNotification(updatedBy, `You updated shipment ${updated.orderId} to ${dto.status}`, "in-app"), this.createNotification(updated.customerId, `Your shipment ${updated.orderId} status changed to ${dto.status}`, "in-app"), updated.assignedTransporterId ? this.createNotification(updated.assignedTransporterId, `Shipment ${updated.orderId} is now ${dto.status}`, "in-app") : Promise.resolve(), updated.assignedWarehouseId ? this.createNotification(updated.assignedWarehouseId, `Shipment ${updated.orderId} is now ${dto.status}`, "in-app") : Promise.resolve()]);
 
 		return updated;
@@ -423,29 +393,17 @@ export class ShipmentsService {
 					break;
 
 				case "new":
-					where.status = ShipmentStatus.PENDING_ACCEPTANCE;
+					where.status = ShipmentStatus.NEW_ORDER;
 					break;
 
 				case "pending":
-					where.status = ShipmentStatus.PENDING_ACCEPTANCE;
+					where.status = ShipmentStatus.PENDING;
 					break;
 
 				case "in_warehouse":
 				case "warehouse":
-					where.status = ShipmentStatus.ACCEPTED;
+					where.status = ShipmentStatus.IN_WAREHOUSE;
 					where.assignedWarehouseId = { not: null };
-					break;
-
-				case "in_transit":
-					where.status = ShipmentStatus.IN_TRANSIT;
-					break;
-
-				case "completed":
-					where.status = ShipmentStatus.COMPLETED;
-					break;
-
-				case "cancelled":
-					where.status = ShipmentStatus.CANCELLED;
 					break;
 
 				default:
@@ -789,8 +747,123 @@ export class ShipmentsService {
 		};
 	}
 
+	// async getDashboardAnalytics(userId: string): Promise<AnalyticsResponseDto> {
+	// 	// Get user details to determine access level
+	// 	const user = await this.prisma.user.findUnique({
+	// 		where: { id: userId },
+	// 		select: { id: true, kind: true, role: true },
+	// 	});
+
+	// 	if (!user) throw new ForbiddenException("User not found");
+
+	// 	// Base where clause based on user role
+	// 	// const where: any = this.buildWhereClauseForUser(user);
+
+	// 	// Get all shipments for this user
+	// 	const shipments = await this.prisma.shipment.findMany({
+	// 		where: { createdBy: userId },
+	// 		include: {
+	// 			transporter: true,
+	// 			statusHistory: {
+	// 				orderBy: { timestamp: "desc" },
+	// 			},
+	// 		},
+	// 	});
+
+	// 	// Calculate metrics
+	// 	const now = new Date();
+	// 	const expectedDeliveryBuffer = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
+	// 	// 1. Active Vehicles (unique transporters currently assigned)
+	// 	const activeVehicles = shipments.filter((s) => ["ACCEPTED", "EN_ROUTE_TO_PICKUP", "PICKED_UP", "IN_TRANSIT"].includes(s.status)).length;
+
+	// 	// 2. Shipments In Transit
+	// 	const shipmentsInTransit = shipments.filter((s) => ["EN_ROUTE_TO_PICKUP", "PICKED_UP", "IN_TRANSIT", "ARRIVED_AT_DESTINATION"].includes(s.status)).length;
+
+	// 	// 3. Completed Deliveries
+	// 	const completedDeliveries = shipments.filter((s) => s.status === "COMPLETED").length;
+
+	// 	// 4. Delayed Shipments (past expected delivery date)
+	// 	const delayedShipments = shipments.filter((s) => {
+	// 		if (s.status === "COMPLETED" || s.status === "CANCELLED") return false;
+	// 		if (!s.deliveryDate) return false;
+	// 		return new Date(s.deliveryDate).getTime() < now.getTime();
+	// 	}).length;
+
+	// 	// 5. Average Delivery Time (for completed shipments)
+	// 	const completedShipmentsWithDates = shipments.filter((s) => s.status === "COMPLETED" && s.pickupDate && s.deliveryDate);
+
+	// 	let averageDeliveryTimeMinutes = 0;
+	// 	if (completedShipmentsWithDates.length > 0) {
+	// 		const totalDeliveryTime = completedShipmentsWithDates.reduce((sum, shipment) => {
+	// 			// Find actual pickup time from status history
+	// 			const pickupHistory = shipment.statusHistory.find((h) => h.status === "PICKED_UP");
+	// 			const completedHistory = shipment.statusHistory.find((h) => h.status === "COMPLETED");
+
+	// 			if (pickupHistory && completedHistory) {
+	// 				const pickupTime = new Date(pickupHistory.timestamp).getTime();
+	// 				const completedTime = new Date(completedHistory.timestamp).getTime();
+	// 				const deliveryTimeMs = completedTime - pickupTime;
+	// 				return sum + deliveryTimeMs / (1000 * 60); // Convert to minutes
+	// 			}
+	// 			return sum;
+	// 		}, 0);
+
+	// 		averageDeliveryTimeMinutes = Math.round(totalDeliveryTime / completedShipmentsWithDates.length);
+	// 	}
+
+	// 	const hours = Math.floor(averageDeliveryTimeMinutes / 60);
+	// 	const minutes = averageDeliveryTimeMinutes % 60;
+
+	// 	// Status breakdown
+	// 	const byStatus = {
+	// 		pending: shipments.filter((s) => s.status === "PENDING_ACCEPTANCE").length,
+	// 		accepted: shipments.filter((s) => s.status === "ACCEPTED").length,
+	// 		inTransit: shipmentsInTransit,
+	// 		completed: completedDeliveries,
+	// 		cancelled: shipments.filter((s) => s.status === "CANCELLED").length,
+	// 		delayed: delayedShipments,
+	// 	};
+
+	// 	// Recent activity (last 10 status updates)
+	// 	const recentActivity = await this.prisma.shipmentStatusHistory.findMany({
+	// 		where: {
+	// 			shipment: { createdBy: userId },
+	// 		},
+	// 		take: 10,
+	// 		orderBy: { timestamp: "desc" },
+	// 		include: {
+	// 			shipment: {
+	// 				select: {
+	// 					id: true,
+	// 					orderId: true,
+	// 				},
+	// 			},
+	// 		},
+	// 	});
+
+	// 	return {
+	// 		activeShipment: activeVehicles,
+	// 		shipmentsInTransit,
+	// 		completedDeliveries,
+	// 		delayedShipments,
+	// 		averageDeliveryTime: {
+	// 			hours,
+	// 			minutes,
+	// 			totalMinutes: averageDeliveryTimeMinutes,
+	// 		},
+	// 		totalShipments: shipments.length,
+	// 		byStatus,
+	// 		recentActivity: recentActivity.map((activity) => ({
+	// 			shipmentId: activity.shipment.id,
+	// 			orderId: activity.shipment.orderId,
+	// 			status: activity.status,
+	// 			updatedAt: activity.timestamp,
+	// 		})),
+	// 	};
+	// }
+
 	async getDashboardAnalytics(userId: string): Promise<AnalyticsResponseDto> {
-		// Get user details to determine access level
 		const user = await this.prisma.user.findUnique({
 			where: { id: userId },
 			select: { id: true, kind: true, role: true },
@@ -798,166 +871,96 @@ export class ShipmentsService {
 
 		if (!user) throw new ForbiddenException("User not found");
 
-		// Base where clause based on user role
-		// const where: any = this.buildWhereClauseForUser(user);
-
-		// Get all shipments for this user
 		const shipments = await this.prisma.shipment.findMany({
 			where: { createdBy: userId },
 			include: {
 				transporter: true,
-				statusHistory: {
-					orderBy: { timestamp: "desc" },
-				},
+				statusHistory: { orderBy: { timestamp: "desc" } },
 			},
 		});
 
-		// Calculate metrics
 		const now = new Date();
-		const expectedDeliveryBuffer = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
-		// 1. Active Vehicles (unique transporters currently assigned)
-		const activeVehicles = shipments.filter((s) => ["ACCEPTED", "EN_ROUTE_TO_PICKUP", "PICKED_UP", "IN_TRANSIT"].includes(s.status)).length;
+		// STATUS MAPPING
+		const pendingCount = shipments.filter((s: any) => s.status === ShipmentStatus.NEW_ORDER).length;
 
-		// 2. Shipments In Transit
-		const shipmentsInTransit = shipments.filter((s) => ["EN_ROUTE_TO_PICKUP", "PICKED_UP", "IN_TRANSIT", "ARRIVED_AT_DESTINATION"].includes(s.status)).length;
+		const inTransitCount = shipments.filter((s: any) => s.status === ShipmentStatus.PENDING).length;
 
-		// 3. Completed Deliveries
-		const completedDeliveries = shipments.filter((s) => s.status === "COMPLETED").length;
+		const completedCount = shipments.filter((s: any) => s.status === ShipmentStatus.IN_WAREHOUSE).length;
 
-		// 4. Delayed Shipments (past expected delivery date)
-		const delayedShipments = shipments.filter((s) => {
-			if (s.status === "COMPLETED" || s.status === "CANCELLED") return false;
+		// 🔥 DELAYED = not completed + delivery date passed
+		const delayedShipments = shipments.filter((s: any) => {
+			if (s.status === ShipmentStatus.IN_WAREHOUSE) return false;
 			if (!s.deliveryDate) return false;
 			return new Date(s.deliveryDate).getTime() < now.getTime();
 		}).length;
 
-		// 5. Average Delivery Time (for completed shipments)
-		const completedShipmentsWithDates = shipments.filter((s) => s.status === "COMPLETED" && s.pickupDate && s.deliveryDate);
+		// AVERAGE DELIVERY TIME
+		const completedWithDates = shipments.filter((s: any) => s.status === ShipmentStatus.IN_WAREHOUSE && s.pickupDate && s.deliveryDate);
 
-		let averageDeliveryTimeMinutes = 0;
-		if (completedShipmentsWithDates.length > 0) {
-			const totalDeliveryTime = completedShipmentsWithDates.reduce((sum, shipment) => {
-				// Find actual pickup time from status history
-				const pickupHistory = shipment.statusHistory.find((h) => h.status === "PICKED_UP");
-				const completedHistory = shipment.statusHistory.find((h) => h.status === "COMPLETED");
+		let averageMinutes = 0;
 
-				if (pickupHistory && completedHistory) {
-					const pickupTime = new Date(pickupHistory.timestamp).getTime();
-					const completedTime = new Date(completedHistory.timestamp).getTime();
-					const deliveryTimeMs = completedTime - pickupTime;
-					return sum + deliveryTimeMs / (1000 * 60); // Convert to minutes
-				}
-				return sum;
+		if (completedWithDates.length > 0) {
+			const total = completedWithDates.reduce((sum: any, s: any) => {
+				if (!s.pickupDate || !s.deliveryDate) return sum;
+
+				const pickup = new Date(s.pickupDate!).getTime();
+				const delivered = new Date(s.deliveryDate!).getTime();
+
+				return sum + (delivered - pickup) / (1000 * 60);
 			}, 0);
 
-			averageDeliveryTimeMinutes = Math.round(totalDeliveryTime / completedShipmentsWithDates.length);
+			averageMinutes = Math.round(total / completedWithDates.length);
 		}
 
-		const hours = Math.floor(averageDeliveryTimeMinutes / 60);
-		const minutes = averageDeliveryTimeMinutes % 60;
+		const hours = Math.floor(averageMinutes / 60);
+		const minutes = averageMinutes % 60;
 
-		// Status breakdown
-		const byStatus = {
-			pending: shipments.filter((s) => s.status === "PENDING_ACCEPTANCE").length,
-			accepted: shipments.filter((s) => s.status === "ACCEPTED").length,
-			inTransit: shipmentsInTransit,
-			completed: completedDeliveries,
-			cancelled: shipments.filter((s) => s.status === "CANCELLED").length,
-			delayed: delayedShipments,
-		};
-
-		// Recent activity (last 10 status updates)
 		const recentActivity = await this.prisma.shipmentStatusHistory.findMany({
-			where: {
-				shipment: { createdBy: userId },
-			},
+			where: { shipment: { createdBy: userId } },
 			take: 10,
 			orderBy: { timestamp: "desc" },
-			include: {
-				shipment: {
-					select: {
-						id: true,
-						orderId: true,
-					},
-				},
-			},
+			include: { shipment: { select: { id: true, orderId: true } } },
 		});
 
 		return {
-			activeShipment: activeVehicles,
-			shipmentsInTransit,
-			completedDeliveries,
+			activeShipment: inTransitCount,
+			shipmentsInTransit: inTransitCount,
+			completedDeliveries: completedCount,
 			delayedShipments,
 			averageDeliveryTime: {
 				hours,
 				minutes,
-				totalMinutes: averageDeliveryTimeMinutes,
+				totalMinutes: averageMinutes,
 			},
 			totalShipments: shipments.length,
-			byStatus,
-			recentActivity: recentActivity.map((activity) => ({
-				shipmentId: activity.shipment.id,
-				orderId: activity.shipment.orderId,
-				status: activity.status,
-				updatedAt: activity.timestamp,
+			// byStatus: {
+			// 	pending: pendingCount,
+			// 	inTransit: inTransitCount,
+			// 	completed: completedCount,
+			// 	delayed: delayedShipments,
+			// },
+			recentActivity: recentActivity.map((a: any) => ({
+				shipmentId: a.shipment.id,
+				orderId: a.shipment.orderId,
+				status: a.status,
+				updatedAt: a.timestamp,
 			})),
 		};
 	}
 
-	// Helper method to build where clause based on user role
-	private buildWhereClauseForUser(user: { id: string; kind: string; role: string | null }): any {
-		const where: any = {};
-
-		if (user.kind === "LOGISTIC_SERVICE_PROVIDER" || user.role === "CROSS_BORDER_LOGISTICS") {
-			// LSP can see all shipments - no filter needed
-			return (where.createdBy = user.id);
-		} else if (user.role === "TRANSPORTER" || user.role === "LAST_MILE_PROVIDER") {
-			// Transporters only see assigned shipments
-			where.createdBy = user.id;
-		} else if (user.kind === "ENTERPRISE" || user.kind === "DISTRIBUTOR") {
-			// Enterprises see shipments they created
-			where.createdBy = user.id;
-		} else if (user.kind === "END_USER") {
-			// End users see shipments where they are the customer
-			where.customerId = user.id;
-		} else {
-			// Unknown role - return impossible condition
-			where.id = "impossible-id";
-		}
-
-		return where;
-	}
-
-	// HELPER: Get access level description
-	private getAccessLevel(kind: string, role: string | null): string {
-		if (kind === "LOGISTIC_SERVICE_PROVIDER" || role === "CROSS_BORDER_LOGISTICS") {
-			return "full_access";
-		} else if (role === "TRANSPORTER" || role === "LAST_MILE_PROVIDER") {
-			return "assigned_only";
-		} else if (kind === "ENTERPRISE" || kind === "DISTRIBUTOR") {
-			return "created_only";
-		} else if (kind === "END_USER") {
-			return "customer_only";
-		}
-		return "no_access";
-	}
-
 	// HELPER: Get analytics for LSP dashboard
 	private async getShipmentAnalytics(where: any) {
-		const [totalShipments, pendingAcceptance, inTransit, completed, cancelled] = await Promise.all([
+		const [totalShipments, pendingAcceptance, inTransit, completed] = await Promise.all([
 			this.prisma.shipment.count({ where }),
 			this.prisma.shipment.count({
-				where: { ...where, status: "PENDING_ACCEPTANCE" },
+				where: { ...where, status: "NEW_ORDER" },
 			}),
 			this.prisma.shipment.count({
-				where: { ...where, status: "IN_TRANSIT" },
+				where: { ...where, status: "PENDING" },
 			}),
 			this.prisma.shipment.count({
-				where: { ...where, status: "COMPLETED" },
-			}),
-			this.prisma.shipment.count({
-				where: { ...where, status: "CANCELLED" },
+				where: { ...where, status: "IN_WAREHOUSE" },
 			}),
 		]);
 
@@ -967,7 +970,6 @@ export class ShipmentsService {
 				pendingAcceptance,
 				inTransit,
 				completed,
-				cancelled,
 			},
 		};
 	}
@@ -1066,8 +1068,8 @@ export class ShipmentsService {
 			destination: shipment.destination,
 			pickupDate: shipment.pickupDate,
 			deliveryDate: shipment.deliveryDate,
-			currentLocation: this.getCurrentLocation(shipment.status),
-			timeline: shipment.statusHistory.map((h) => ({
+			currentLocation: this.getCurrentLocation(shipment.status as ShipmentStatus),
+			timeline: shipment.statusHistory.map((h: any) => ({
 				status: h.status,
 				timestamp: h.timestamp,
 				note: h.note,
@@ -1107,7 +1109,7 @@ export class ShipmentsService {
 	async remove(shipmentId: string, userId: string): Promise<{ message: string }> {
 		await this.verifyShipmentOwnership(shipmentId, userId);
 
-		await this.prisma.$transaction(async (tx) => {
+		await this.prisma.$transaction(async (tx: any) => {
 			await tx.shipmentDocument.deleteMany({ where: { shipmentId } });
 			await tx.shipmentStatusHistory.deleteMany({ where: { shipmentId } });
 			await tx.shipment.delete({ where: { id: shipmentId } });
@@ -1144,14 +1146,11 @@ export class ShipmentsService {
 		}
 	}
 
-	private validateStatusTransition(current: string, next: ShipmentStatus): void {
-		const validTransitions: Record<string, ShipmentStatus[]> = {
-			[ShipmentStatus.PENDING_ACCEPTANCE]: [ShipmentStatus.ACCEPTED, ShipmentStatus.CANCELLED],
-			[ShipmentStatus.ACCEPTED]: [ShipmentStatus.EN_ROUTE_TO_PICKUP, ShipmentStatus.CANCELLED],
-			[ShipmentStatus.EN_ROUTE_TO_PICKUP]: [ShipmentStatus.PICKED_UP, ShipmentStatus.CANCELLED],
-			[ShipmentStatus.PICKED_UP]: [ShipmentStatus.IN_TRANSIT, ShipmentStatus.CANCELLED],
-			[ShipmentStatus.IN_TRANSIT]: [ShipmentStatus.ARRIVED_AT_DESTINATION, ShipmentStatus.CANCELLED],
-			[ShipmentStatus.ARRIVED_AT_DESTINATION]: [ShipmentStatus.COMPLETED],
+	private validateStatusTransition(current: ShipmentStatus, next: ShipmentStatus): void {
+		const validTransitions: Record<ShipmentStatus, ShipmentStatus[]> = {
+			[ShipmentStatus.NEW_ORDER]: [ShipmentStatus.PENDING],
+			[ShipmentStatus.PENDING]: [ShipmentStatus.IN_WAREHOUSE],
+			[ShipmentStatus.IN_WAREHOUSE]: [], // final state
 		};
 
 		if (!validTransitions[current]?.includes(next)) {
@@ -1159,22 +1158,14 @@ export class ShipmentsService {
 		}
 	}
 
-	private formatStatusForDisplay(status: ShipmentStatus): string {
-		return status.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
-	}
-
-	private getCurrentLocation(status: string): string {
-		const locationMap: Record<string, string> = {
-			[ShipmentStatus.PENDING_ACCEPTANCE]: "Order Pending",
-			[ShipmentStatus.ACCEPTED]: "Preparing for Pickup",
-			[ShipmentStatus.EN_ROUTE_TO_PICKUP]: "En Route to Pickup Location",
-			[ShipmentStatus.PICKED_UP]: "Picked Up",
-			[ShipmentStatus.IN_TRANSIT]: "In Transit",
-			[ShipmentStatus.ARRIVED_AT_DESTINATION]: "Arrived at Destination",
-			[ShipmentStatus.COMPLETED]: "Delivered",
-			[ShipmentStatus.CANCELLED]: "Cancelled",
+	private getCurrentLocation(status: ShipmentStatus): string {
+		const locationMap: Record<ShipmentStatus, string> = {
+			[ShipmentStatus.NEW_ORDER]: "Pending – Awaiting Processing",
+			[ShipmentStatus.IN_WAREHOUSE]: "In Warehouse",
+			[ShipmentStatus.PENDING]: "Accepted and in transit",
 		};
-		return locationMap[status] || "Unknown";
+
+		return locationMap[status] ?? "Unknown Status";
 	}
 
 	private detectDocumentType(filename?: string): DocumentType {
@@ -1222,7 +1213,7 @@ export class ShipmentsService {
 				}
 
 				await Promise.all(
-					companyUsers.map((u) =>
+					companyUsers.map((u: any) =>
 						this.prisma.notification.create({
 							data: {
 								userId: u.id,

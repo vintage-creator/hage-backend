@@ -296,6 +296,7 @@ export class AuthService {
 			user: {
 				id: user.id,
 				email: user.email,
+				profilePicture: user.profilePicture,
 				phone: user.phone,
 				role: user.role,
 				name: user.company?.fullName ?? null,

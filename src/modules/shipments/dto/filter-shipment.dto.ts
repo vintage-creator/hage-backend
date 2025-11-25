@@ -7,9 +7,6 @@ export enum StatusFilterEnum {
 	NEW_ORDERS = "new_orders",
 	PENDING = "pending",
 	IN_WAREHOUSE = "in_warehouse",
-	IN_TRANSIT = "in_transit",
-	COMPLETED = "completed",
-	CANCELLED = "cancelled",
 	ALL = "all",
 }
 
