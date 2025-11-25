@@ -140,15 +140,20 @@ export class ShipmentsService {
 			const destinationText = this.formatLocationText(destinationObj);
 
 			if (dto.email) {
-				await this.mailer.sendShipmentCreated(dto.email, {
-					clientName: dto.clientName,
-					trackingNumber: shipment.orderId,
-					origin: originText,
-					destination: destinationText,
-					estimatedDelivery: this.prettyDate(shipment.deliveryDate ?? dto.deliveryDate),
-					status: ShipmentStatus.NEW_ORDER,
-					trackingUrl: `${this.urlService.normalizePrefix()}`,
-				});
+				try {
+					await this.mailer.sendShipmentCreated(dto.email, {
+						clientName: dto.clientName,
+						trackingNumber: shipment.orderId,
+						origin: originText,
+						destination: destinationText,
+						estimatedDelivery: this.prettyDate(shipment.deliveryDate ?? dto.deliveryDate),
+						status: ShipmentStatus.NEW_ORDER,
+						trackingUrl: `${this.urlService.normalizePrefix()}`,
+					});
+				} catch (err: any) {
+					// Log and continue
+					console.error("Failed to send shipment email:", err?.message || err);
+				}
 			}
 
 			await this.createNotification(lspUserId, `New shipment ${shipment.orderId} created successfully`, "in-app");
