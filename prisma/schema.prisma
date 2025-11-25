@@ -50,14 +50,9 @@ enum InventoryCondition {
 }
 
 enum ShipmentStatus {
-  PENDING_ACCEPTANCE
-  ACCEPTED
-  EN_ROUTE_TO_PICKUP
-  PICKED_UP
-  IN_TRANSIT
-  ARRIVED_AT_DESTINATION
-  COMPLETED
-  CANCELLED
+  NEW_ORDER
+  PENDING
+  IN_WAREHOUSE
 }
 
 enum DocumentType {
