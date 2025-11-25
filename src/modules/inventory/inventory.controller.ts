@@ -1,9 +1,9 @@
 import { Body, Controller, Get, Param, Post, Patch, Delete, Query, UseGuards, Req, BadRequestException } from "@nestjs/common";
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiOkResponse } from "@nestjs/swagger";
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiOkResponse, ApiConsumes } from "@nestjs/swagger";
 import { InventoryService } from "./inventory.service";
 import { CreateInventoryDto } from "./dto/create-inventory.dto";
 import { CreateInventoryLocationDto } from "./dto/create-inventory-location.dto";
-import { UpdateInventoryLocationDto } from "./dto/update-inventory-location.dto";
+import { UpdateInventoryLocationDto, UpdateInventoryStatusDto } from "./dto/update-inventory-location.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { InventoryLocationStatus } from "@prisma/client";
 
@@ -160,14 +160,16 @@ export class InventoryController {
 	}
 
 	@Patch("locations/:id/status")
+	@ApiConsumes("application/json")
 	@ApiParam({ name: "id", description: "Inventory ID" })
 	@ApiOperation({
 		summary: "Update inventory status",
 		description: "Update status through the lifecycle: AVAILABLE → RESERVED → etc.",
 	})
-	async updateInventoryLocationStatus(@Param("id") id: string, @Body() body: { status: InventoryLocationStatus; note?: string }, @Req() req: any) {
+	async updateInventoryLocationStatus(@Param("id") id: string, @Body() body: UpdateInventoryStatusDto, @Req() req: any) {
 		const updatedBy = req.user?.id || req.user?.sub;
-		return this.svc.updateInventoryStatus(id, body.status, updatedBy, body.note);
+
+		return this.svc.updateInventoryStatus(id, req.body.status, updatedBy);
 	}
 
 	@Delete("locations/:id")

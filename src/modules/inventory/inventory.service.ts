@@ -750,6 +750,8 @@ export class InventoryService {
 
 		if (!loc) throw new NotFoundException("Inventory not found");
 
+		console.log(status);
+
 		return this.prisma.inventory.update({
 			where: { id },
 			data: {
