@@ -105,7 +105,7 @@ export class ShipmentsService {
 						handlingFee: sanitizeNumber(dto.handlingFee),
 						insuranceFee: sanitizeNumber(dto.insuranceFee),
 						totalCost: sanitizeNumber(dto.baseFrieght) + sanitizeNumber(dto.handlingFee) + sanitizeNumber(dto.insuranceFee),
-						status: ShipmentStatus.NEW_ORDER as any,
+						status: ShipmentStatus.PENDING as any,
 						createdBy: lspUserId,
 						customerId: lspUserId,
 					},
@@ -114,7 +114,7 @@ export class ShipmentsService {
 				await tx.shipmentStatusHistory.create({
 					data: {
 						shipmentId: createdShipment.id,
-						status: ShipmentStatus.NEW_ORDER as any,
+						status: ShipmentStatus.PENDING as any,
 						updatedBy: lspUserId,
 					},
 				});
@@ -147,7 +147,7 @@ export class ShipmentsService {
 						origin: originText,
 						destination: destinationText,
 						estimatedDelivery: this.prettyDate(shipment.deliveryDate ?? dto.deliveryDate),
-						status: ShipmentStatus.NEW_ORDER,
+						status: ShipmentStatus.PENDING,
 						trackingUrl: `${this.urlService.normalizePrefix()}`,
 					});
 				} catch (err: any) {
@@ -182,7 +182,7 @@ export class ShipmentsService {
 			where: { id: shipmentId },
 		});
 		if (!shipment) throw new NotFoundException("Shipment not found");
-		if (shipment.status !== (ShipmentStatus.NEW_ORDER as any)) {
+		if (shipment.status !== (ShipmentStatus.PENDING as any)) {
 			throw new BadRequestException("Shipment already accepted or not pending");
 		}
 
@@ -240,7 +240,7 @@ export class ShipmentsService {
 			const updatedShipment = await tx.shipment.update({
 				where: { id: shipmentId },
 				data: {
-					status: ShipmentStatus.PENDING as any,
+					status: ShipmentStatus.IN_WAREHOUSE as any,
 					assignedTransporterId: dto.transporterId,
 					assignedWarehouseId: dto.warehouseId,
 					assignedZoneId: assignedLocation?.zoneId || null,
@@ -256,7 +256,7 @@ export class ShipmentsService {
 			await tx.shipmentStatusHistory.create({
 				data: {
 					shipmentId,
-					status: ShipmentStatus.PENDING as any,
+					status: ShipmentStatus.IN_WAREHOUSE as any,
 					updatedBy: lspUserId,
 				},
 			});
@@ -351,7 +351,7 @@ export class ShipmentsService {
 
 	/**
 	 * Get all shipments with optional status filtering
-	 * Status filters: "new_orders", "pending", "in_warehouse", or return all without filter
+	 * Status filters: "PENDINGs", "pending", "in_warehouse", or return all without filter
 	 */
 	async findAll(filters: FilterShipmentDto, userId: string) {
 		// Get user details to determine access level
@@ -392,23 +392,32 @@ export class ShipmentsService {
 		// Map friendly status filters to actual shipment statuses
 		if (statusFilter) {
 			switch (statusFilter.toLowerCase()) {
-				case "new_orders":
+				case "pendings":
 					// Return newest shipments (NO STATUS FILTER)
-					// Just break and let orderBy(createdAt DESC) do its work
 					break;
 
 				case "new":
-					where.status = ShipmentStatus.NEW_ORDER;
-					break;
-
 				case "pending":
 					where.status = ShipmentStatus.PENDING;
 					break;
 
 				case "in_warehouse":
+					where.status = ShipmentStatus.IN_WAREHOUSE;
+					where.assignedWarehouseId = { not: null };
+					break;
 				case "warehouse":
 					where.status = ShipmentStatus.IN_WAREHOUSE;
 					where.assignedWarehouseId = { not: null };
+					break;
+
+				case "new_orders":
+					// Shipments from today AND up to 3 days old
+					const threeDaysAgo = new Date();
+					threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+
+					where.createdAt = {
+						gte: threeDaysAgo,
+					};
 					break;
 
 				default:
@@ -416,47 +425,6 @@ export class ShipmentsService {
 					break;
 			}
 		}
-
-		// // Apply additional filters from query parameters
-		// if (filterCriteria.status) {
-		// 	// normalize both statusFilter and filterCriteria.status
-		// 	const s = filterCriteria.status.toLowerCase();
-
-		// 	switch (s) {
-		// 		case "new_orders":
-		// 		case "new":
-		// 			where.status = ShipmentStatus.PENDING_ACCEPTANCE;
-		// 			break;
-
-		// 		case "pending":
-		// 			where.status = {
-		// 				in: [ShipmentStatus.ACCEPTED, ShipmentStatus.EN_ROUTE_TO_PICKUP, ShipmentStatus.PICKED_UP],
-		// 			};
-		// 			break;
-
-		// 		case "in_warehouse":
-		// 		case "warehouse":
-		// 			where.status = ShipmentStatus.ACCEPTED;
-		// 			where.assignedWarehouseId = { not: null };
-		// 			break;
-
-		// 		case "in_transit":
-		// 			where.status = ShipmentStatus.IN_TRANSIT;
-		// 			break;
-
-		// 		case "completed":
-		// 			where.status = ShipmentStatus.COMPLETED;
-		// 			break;
-
-		// 		case "cancelled":
-		// 			where.status = ShipmentStatus.CANCELLED;
-		// 			break;
-
-		// 		default:
-		// 			this.logger.warn(`Invalid status: ${filterCriteria.status}`);
-		// 			break;
-		// 	}
-		// }
 
 		if (filterCriteria.orderId) {
 			where.orderId = { contains: filterCriteria.orderId, mode: "insensitive" };
@@ -887,7 +855,7 @@ export class ShipmentsService {
 		const now = new Date();
 
 		// STATUS MAPPING
-		const pendingCount = shipments.filter((s: any) => s.status === ShipmentStatus.NEW_ORDER).length;
+		const pendingCount = shipments.filter((s: any) => s.status === ShipmentStatus.PENDING).length;
 
 		const inTransitCount = shipments.filter((s: any) => s.status === ShipmentStatus.PENDING).length;
 
@@ -959,7 +927,7 @@ export class ShipmentsService {
 		const [totalShipments, pendingAcceptance, inTransit, completed] = await Promise.all([
 			this.prisma.shipment.count({ where }),
 			this.prisma.shipment.count({
-				where: { ...where, status: "NEW_ORDER" },
+				where: { ...where, status: "PENDING" },
 			}),
 			this.prisma.shipment.count({
 				where: { ...where, status: "PENDING" },
@@ -1153,7 +1121,6 @@ export class ShipmentsService {
 
 	private validateStatusTransition(current: ShipmentStatus, next: ShipmentStatus): void {
 		const validTransitions: Record<ShipmentStatus, ShipmentStatus[]> = {
-			[ShipmentStatus.NEW_ORDER]: [ShipmentStatus.PENDING],
 			[ShipmentStatus.PENDING]: [ShipmentStatus.IN_WAREHOUSE],
 			[ShipmentStatus.IN_WAREHOUSE]: [], // final state
 		};
@@ -1165,9 +1132,8 @@ export class ShipmentsService {
 
 	private getCurrentLocation(status: ShipmentStatus): string {
 		const locationMap: Record<ShipmentStatus, string> = {
-			[ShipmentStatus.NEW_ORDER]: "Pending – Awaiting Processing",
+			[ShipmentStatus.PENDING]: "Pending – Awaiting Processing",
 			[ShipmentStatus.IN_WAREHOUSE]: "In Warehouse",
-			[ShipmentStatus.PENDING]: "Accepted and in transit",
 		};
 
 		return locationMap[status] ?? "Unknown Status";

@@ -50,7 +50,6 @@ enum InventoryCondition {
 }
 
 enum ShipmentStatus {
-  NEW_ORDER
   PENDING
   IN_WAREHOUSE
 }
@@ -362,7 +361,7 @@ model Shipment {
   totalCost    Float
 
   // STATUS & ASSIGNMENT
-  status                ShipmentStatus @default(NEW_ORDER)
+  status                ShipmentStatus @default(PENDING)
   assignedTransporterId String?
   assignedWarehouseId   String?
   assignedZoneId        String?
