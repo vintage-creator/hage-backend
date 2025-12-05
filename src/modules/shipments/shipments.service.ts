@@ -289,7 +289,7 @@ export class ShipmentsService {
 			await this.mailer.sendShipmentStatusUpdate(updated.email, {
 				clientName: updated.clientName,
 				trackingNumber: updated.orderId,
-				status: "Accepted",
+				status: "In warehouse",
 				origin: originText,
 				destination: destinationText,
 				estimatedDelivery: this.prettyDate(updated.deliveryDate),

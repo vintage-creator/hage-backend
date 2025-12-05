@@ -173,7 +173,7 @@ export class InventoryService {
 					origin: originText,
 					destination: destinationText,
 					estimatedDelivery: this.prettyDate(createdShipment.deliveryDate ?? dto.deliveryDate),
-					status: "Accepted",
+					status: "In warehouse",
 					trackingUrl: `${this.urlService.normalizePrefix()}`,
 				});
 			} catch (err: any) {
