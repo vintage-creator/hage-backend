@@ -12,6 +12,10 @@ import { CreateRackDto } from "./dto/create-rack.dto";
 import { CreateBinDto } from "./dto/create-bin.dto";
 import { WarehouseStatus } from "@prisma/client";
 import { UpdateWarehouseDto } from "./dto/update-warehouse.dto";
+import {
+  refreshWarehouseStatus,
+  getWarehouseUsage,
+} from "./helpers/warehouses.helpers";
 
 @Injectable()
 export class WarehousesService {
@@ -221,7 +225,6 @@ export class WarehousesService {
           dto.numBinsPerRack
         );
       } catch (error) {
-        // If structure generation fails, log error but don't fail warehouse creation
         console.error("Failed to generate warehouse structure:", error);
       }
     }
@@ -236,26 +239,12 @@ export class WarehousesService {
     };
   }
 
+  /**
+   * Thin wrapper that delegates to the shared helper which does the aggregate.
+   * Kept so call-sites in the service remain unchanged.
+   */
   private async computeUsageForWarehouse(warehouseId: string) {
-    const agg = await this.prisma.bin.aggregate({
-      _sum: {
-        currentQty: true,
-        reservedQty: true,
-      },
-      where: {
-        rack: {
-          zone: {
-            warehouseId: warehouseId,
-          },
-        },
-      },
-    });
-
-    const used = Number(agg._sum.currentQty ?? 0);
-    const reserved = Number(agg._sum.reservedQty ?? 0);
-    const usedPlusReserved = used + reserved;
-
-    return { used, reserved, usedPlusReserved };
+    return getWarehouseUsage(this.prisma, warehouseId);
   }
 
   async listWarehouses(companyId?: string, page = 1, perPage = 20) {
@@ -278,8 +267,9 @@ export class WarehousesService {
         const { used, reserved, usedPlusReserved } =
           await this.computeUsageForWarehouse(w.id);
 
-        const available = Math.max(0, w.totalCapacity - usedPlusReserved);
-        const isFull = usedPlusReserved >= w.totalCapacity;
+        const computedStatus =
+          usedPlusReserved >= (w.totalCapacity ?? 0) ? "INACTIVE" : w.status;
+        const available = Math.max(0, (w.totalCapacity ?? 0) - usedPlusReserved);
 
         return {
           ...w,
@@ -287,8 +277,7 @@ export class WarehousesService {
           reservedCapacity: reserved,
           usedPlusReserved,
           availableCapacity: available,
-          isFull,
-          computedStatus: w.status,
+          computedStatus,
         };
       })
     );
@@ -324,7 +313,8 @@ export class WarehousesService {
     const { used, reserved, usedPlusReserved } =
       await this.computeUsageForWarehouse(id);
     const available = Math.max(0, wh.totalCapacity - usedPlusReserved);
-    const isFull = usedPlusReserved >= wh.totalCapacity;
+    const computedStatus =
+      usedPlusReserved >= wh.totalCapacity ? "INACTIVE" : wh.status;
 
     return {
       ...wh,
@@ -332,8 +322,8 @@ export class WarehousesService {
       reservedCapacity: reserved,
       usedPlusReserved,
       availableCapacity: available,
-      isFull,
-      computedStatus: wh.status,
+      available,
+      computedStatus,
     };
   }
 
@@ -341,28 +331,24 @@ export class WarehousesService {
     const wh = await this.prisma.warehouse.findUnique({ where: { id } });
     if (!wh) throw new NotFoundException("Warehouse not found");
 
-    const allowedStatuses = [
-      "ARRIVAL",
-	  "IN_STORAGE",
-      "PICKING",
-      "PACKING",
-      "READY_TO_DISPATCH",
-    ];
-    if (dto.status && !allowedStatuses.includes(dto.status)) {
-      throw new BadRequestException(
-        `Invalid status "${dto.status}". Allowed: ${allowedStatuses.join(", ")}`
-      );
-    }
-
     const { used, reserved, usedPlusReserved } =
       await this.computeUsageForWarehouse(id);
-    const available = Math.max(0, wh.totalCapacity - usedPlusReserved);
-    const isFull = usedPlusReserved >= wh.totalCapacity;
 
-    // Business rule: disallow setting status = ARRIVAL when full
-    if (dto.status === WarehouseStatus.ARRIVAL && isFull) {
+    const totalCap = Number(wh.totalCapacity ?? 0);
+    const computedStatus =
+      totalCap > 0 && usedPlusReserved >= totalCap
+        ? (WarehouseStatus.INACTIVE as WarehouseStatus)
+        : (wh.status as WarehouseStatus);
+
+    const available = Math.max(0, totalCap - usedPlusReserved);
+
+    // Business rule: disallow setting status = ACTIVE when warehouse is full (computed INACTIVE)
+    if (
+      dto.status === WarehouseStatus.ACTIVE &&
+      computedStatus === WarehouseStatus.INACTIVE
+    ) {
       throw new BadRequestException(
-        `Cannot set status to ARRIVAL: warehouse capacity full (available: ${available}).`
+        `Cannot set status to ACTIVE because the warehouse is full (available: ${available}).`
       );
     }
 
@@ -386,7 +372,15 @@ export class WarehousesService {
 
     Object.keys(data).forEach((k) => data[k] === undefined && delete data[k]);
 
-    return this.prisma.warehouse.update({ where: { id }, data });
+    // perform update
+    const updated = await this.prisma.warehouse.update({ where: { id }, data });
+
+    // Ensure status reflects new usage/totalCapacity after the update.
+    // If this update is done as part of a larger transaction that also mutates bins,
+    // call refreshWarehouseStatus(tx, id) inside that transaction instead for atomicity.
+    await refreshWarehouseStatus(this.prisma, id);
+
+    return updated;
   }
 
   async deleteWarehouse(id: string, force = false) {
@@ -679,7 +673,7 @@ export class WarehousesService {
         rack: { id: bestRack.id, name: bestRack.name },
         bin: bestBin,
       },
-      categorized, // hierarchical structure for selection
+      categorized,
     };
   }
 

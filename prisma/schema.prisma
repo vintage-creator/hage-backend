@@ -26,11 +26,10 @@ enum RoleType {
 }
 
 enum WarehouseStatus {
-  ARRIVAL
-  IN_STORAGE
-  PICKING
-  PACKING
-  READY_TO_DISPATCH
+  ACTIVE
+  INACTIVE
+  RESTRICTED
+  MAINTENANCE
 }
 
 enum InventoryLocationStatus {
@@ -165,7 +164,7 @@ model Warehouse {
   address       String
   totalCapacity Int // capacity measured in "capacityUnit"
   capacityUnit  String          @default("pieces")
-  status        WarehouseStatus @default(ARRIVAL)
+  status        WarehouseStatus @default(ACTIVE)
 
   numZones       Int?
   numRows        Int?
