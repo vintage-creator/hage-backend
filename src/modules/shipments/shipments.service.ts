@@ -854,35 +854,38 @@ export class ShipmentsService {
 
 		const now = new Date();
 
-		// STATUS MAPPING
-		const pendingCount = shipments.filter((s: any) => s.status === ShipmentStatus.PENDING).length;
+		// ACTIVE SHIPMENTS: Shipments that are in progress (not yet completed/cancelled)
+		// With your current enum: PENDING = not yet processed, IN_WAREHOUSE = actively being handled
+		const activeShipmentCount = shipments.filter((s: any) => s.status === ShipmentStatus.IN_WAREHOUSE).length;
 
-		const inTransitCount = shipments.filter((s: any) => s.status === ShipmentStatus.PENDING).length;
+		// IN TRANSIT: Same as active for now — extend when you add EN_ROUTE, PICKED_UP etc.
+		const inTransitCount = shipments.filter((s: any) => s.status === ShipmentStatus.IN_WAREHOUSE).length;
 
-		const completedCount = shipments.filter((s: any) => s.status === ShipmentStatus.IN_WAREHOUSE).length;
+		// COMPLETED: Shipments in PENDING status are newly created (not yet completed)
+		// ⚠️ You likely need to add a COMPLETED/DELIVERED status to your enum.
+		// For now, this returns 0 until a terminal status exists.
+		const completedCount = shipments.filter(
+			(s: any) => !["PENDING", "IN_WAREHOUSE"].includes(s.status) // future COMPLETED status
+		).length;
 
-		// 🔥 DELAYED = not completed + delivery date passed
+		// DELAYED: Not in a terminal state AND past expected delivery date
+		const TERMINAL_STATUSES = ["COMPLETED", "DELIVERED", "CANCELLED"]; // extend as needed
 		const delayedShipments = shipments.filter((s: any) => {
-			if (s.status === ShipmentStatus.IN_WAREHOUSE) return false;
-			if (!s.deliveryDate) return false;
-			return new Date(s.deliveryDate).getTime() < now.getTime();
+			if (TERMINAL_STATUSES.includes(s.status)) return false; // already done, not delayed
+			if (!s.deliveryDate) return false; // no deadline set
+			return new Date(s.deliveryDate).getTime() < now.getTime(); // past due
 		}).length;
 
-		// AVERAGE DELIVERY TIME
-		const completedWithDates = shipments.filter((s: any) => s.status === ShipmentStatus.IN_WAREHOUSE && s.pickupDate && s.deliveryDate);
+		// AVERAGE DELIVERY TIME: Only for truly completed shipments with both dates
+		const completedWithDates = shipments.filter((s: any) => TERMINAL_STATUSES.includes(s.status) && s.pickupDate && s.deliveryDate);
 
 		let averageMinutes = 0;
-
 		if (completedWithDates.length > 0) {
-			const total = completedWithDates.reduce((sum: any, s: any) => {
-				if (!s.pickupDate || !s.deliveryDate) return sum;
-
+			const total = completedWithDates.reduce((sum: number, s: any) => {
 				const pickup = new Date(s.pickupDate!).getTime();
 				const delivered = new Date(s.deliveryDate!).getTime();
-
 				return sum + (delivered - pickup) / (1000 * 60);
 			}, 0);
-
 			averageMinutes = Math.round(total / completedWithDates.length);
 		}
 
@@ -897,7 +900,7 @@ export class ShipmentsService {
 		});
 
 		return {
-			activeShipment: inTransitCount,
+			activeShipment: activeShipmentCount,
 			shipmentsInTransit: inTransitCount,
 			completedDeliveries: completedCount,
 			delayedShipments,
@@ -907,12 +910,6 @@ export class ShipmentsService {
 				totalMinutes: averageMinutes,
 			},
 			totalShipments: shipments.length,
-			// byStatus: {
-			// 	pending: pendingCount,
-			// 	inTransit: inTransitCount,
-			// 	completed: completedCount,
-			// 	delayed: delayedShipments,
-			// },
 			recentActivity: recentActivity.map((a: any) => ({
 				shipmentId: a.shipment.id,
 				orderId: a.shipment.orderId,
@@ -927,23 +924,19 @@ export class ShipmentsService {
 		const [totalShipments, pendingAcceptance, inTransit, completed] = await Promise.all([
 			this.prisma.shipment.count({ where }),
 			this.prisma.shipment.count({
-				where: { ...where, status: "PENDING" },
+				where: { ...where, status: ShipmentStatus.PENDING },
 			}),
 			this.prisma.shipment.count({
-				where: { ...where, status: "PENDING" },
+				where: { ...where, status: ShipmentStatus.IN_WAREHOUSE },
 			}),
 			this.prisma.shipment.count({
-				where: { ...where, status: "IN_WAREHOUSE" },
+				where: { ...where, status: "COMPLETED" },
 			}),
 		]);
 
 		return {
 			totalShipments,
-			byStatus: {
-				pendingAcceptance,
-				inTransit,
-				completed,
-			},
+			byStatus: { pendingAcceptance, inTransit, completed },
 		};
 	}
 
