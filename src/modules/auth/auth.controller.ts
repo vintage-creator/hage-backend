@@ -1,15 +1,12 @@
-// src/modules/auth/auth.controller.ts
 import { Response } from "express";
-import { memoryStorage } from 'multer';
-import * as path from 'path';
+import { memoryStorage } from "multer";
+import * as path from "path";
 import {
   Body,
   Controller,
   Req,
   Res,
-  Get,
   Post,
-  Query,
   UploadedFiles,
   UseInterceptors,
   BadRequestException,
@@ -28,7 +25,7 @@ import {
 } from "@nestjs/swagger";
 import { AuthService } from "./auth.service";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
-import { RegisterCompanyDto } from "./dto/register-company.dto";
+import { RegisterCompanyDto, RegisterKind } from "./dto/register-company.dto";
 import { CreatePasswordDto } from "./dto/create-password.dto";
 import { LoginDto } from "./dto/login.dto";
 import { ForgotPasswordRequestDto } from "./dto/forgot-password-request.dto";
@@ -37,18 +34,18 @@ import { LogoutDto } from "./dto/logout.dto";
 type FileFilterCallback = (error: Error | null, acceptFile: boolean) => void;
 
 const pdfFileFilter = (
-  _req: Request, 
+  _req: Request,
   file: Express.Multer.File,
   cb: FileFilterCallback
 ) => {
   const ext = path.extname(file.originalname).toLowerCase();
-  const isPdfMime = file.mimetype === 'application/pdf';
-  const isPdfExt = ext === '.pdf';
+  const isPdfMime = file.mimetype === "application/pdf";
+  const isPdfExt = ext === ".pdf";
 
   if (isPdfMime && isPdfExt) {
     cb(null, true);
   } else {
-    cb(new BadRequestException('Only PDF files are allowed'), false);
+    cb(new BadRequestException("Only PDF files are allowed"), false);
   }
 };
 
@@ -59,7 +56,7 @@ export class AuthController {
 
   @Post("register-company")
   @ApiOperation({
-    summary: "Register company and upload documents (creates unverified user)",
+    summary: "Register user and upload documents (creates unverified user)",
   })
   @ApiConsumes("multipart/form-data")
   @ApiResponse({
@@ -73,12 +70,12 @@ export class AuthController {
         { name: "taxCert", maxCount: 1 },
       ],
       {
-        storage: memoryStorage(), 
+        storage: memoryStorage(),
         fileFilter: pdfFileFilter,
         limits: {
-          fileSize: 5 * 1024 * 1024, // 5 MB per file (adjust as needed)
+          fileSize: 5 * 1024 * 1024,
         },
-      },
+      }
     )
   )
   @ApiBody({
@@ -95,13 +92,10 @@ export class AuthController {
           enum: [
             "ENTERPRISE",
             "DISTRIBUTOR",
-            "END_USER",
+            "INDIVIDUAL",
             "LOGISTIC_SERVICE_PROVIDER",
+            "LAST_MILE_DELIVERY",
           ],
-        },
-        role: {
-          type: "string",
-          enum: ["CROSS_BORDER_LOGISTICS", "TRANSPORTER", "LAST_MILE_PROVIDER"],
         },
         companyCert: { type: "string", format: "binary" },
         taxCert: { type: "string", format: "binary" },
@@ -113,7 +107,6 @@ export class AuthController {
         "businessName",
         "businessAddress",
         "kind",
-        "role",
         "companyCert",
         "taxCert",
       ],
@@ -128,7 +121,6 @@ export class AuthController {
     }
   ) {
     if (!dto.kind) throw new BadRequestException("User kind is required");
-    if (!dto.role) throw new BadRequestException("User role is required");
 
     if (!files || !files.companyCert?.[0] || !files.taxCert?.[0]) {
       throw new BadRequestException(
@@ -204,5 +196,3 @@ export class AuthController {
     return this.auth.requestPasswordReset(dto.email);
   }
 }
-
-
