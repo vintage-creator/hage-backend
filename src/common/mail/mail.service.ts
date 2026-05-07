@@ -9,7 +9,7 @@ import juice from "juice";
 
 @Injectable()
 export class MailService {
-  private resend: Resend;
+  private resend: Resend | null = null;
   private logger = new Logger(MailService.name);
   private templatesDir: string;
 
@@ -20,8 +20,10 @@ export class MailService {
     const apiKey = this.cfg.get<string>("RESEND_API_KEY");
     if (!apiKey) {
       this.logger.warn("RESEND_API_KEY not set — emails will fail until configured");
+      this.resend = null;
+    } else {
+      this.resend = new Resend(apiKey);
     }
-    this.resend = new Resend(apiKey ?? "");
 
     this.testConnection();
   }
@@ -121,6 +123,10 @@ export class MailService {
       const from = this.cfg.get("MAIL_FROM");
       if (!from) {
         throw new Error("MAIL_FROM is not configured");
+      }
+
+      if (!this.resend) {
+        throw new Error("Email provider not configured (missing RESEND_API_KEY)");
       }
 
       // Send via Resend SDK
