@@ -14,7 +14,10 @@ RUN echo "Cache bust: $(date)" > /tmp/cache-bust.txt
 
 # Install ALL deps (not --only=production).
 # We need prisma CLI + devDeps available at runtime because startup.sh calls npx prisma.
-RUN npm ci --no-audit --no-fund && npm cache clean --force
+# NOTE: package.json runs `postinstall: prisma generate`, but the Prisma schema
+# isn't in the image yet (we only copied package*.json). We install deps without
+# lifecycle scripts, then run prisma generate after copying the schema in build.
+RUN npm ci --no-audit --no-fund --ignore-scripts && npm cache clean --force
 
 
 # ---------- 2. development stage: for local dev / hot reload ----------
