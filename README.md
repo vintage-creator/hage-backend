@@ -71,6 +71,28 @@ cp .env.example .env
 Update your .env with database credentials and JWT secrets.
 ```
 
+#### Environment variables (required)
+
+These are the main runtime variables used by the API (locally and in App Runner):
+
+- **Core**: `NODE_ENV`, `PORT`
+- **Database**: `DATABASE_URL`
+- **Auth**: `JWT_SECRET`, `JWT_EXPIRES_IN`, `REFRESH_EXPIRES_DAYS`
+- **URLs/branding**: `APP_NAME`, `APP_URL`, `FRONTEND_URL`, `API_PREFIX`, `APP_LOGO`
+- **Email**:
+  - Required: `MAIL_FROM`
+  - Optional (provider): `RESEND_API_KEY` (app will start without it, but sending emails will fail)
+  - Optional (SMTP): `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`
+- **Storage**: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
+- **App Runner startup controls**: `ENABLE_SEEDING`, `FORCE`
+
+#### GitHub Actions / App Runner deployment variables
+
+The deploy workflow uses GitHub Actions secrets/variables:
+
+- **Secrets**: `AWS_ACCOUNT_ID`
+- **Variables**: `AWS_REGION`, `APP_URL_DEV`, `APP_URL_PROD`, `FRONTEND_URL_DEV`, `FRONTEND_URL_PROD`, `ENABLE_PROD_SEEDING` (optional)
+
 ### 4. Setup Database
 
 ```bash
