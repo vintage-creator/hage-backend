@@ -97,6 +97,15 @@ export class AuthController {
             "LAST_MILE_DELIVERY",
           ],
         },
+        role: {
+          type: "string",
+          enum: [
+            "CROSS_BORDER_LOGISTICS",
+            "TRANSPORTER",
+            "LAST_MILE_PROVIDER",
+          ],
+          description: "Required only when kind is LOGISTIC_SERVICE_PROVIDER",
+        },
         companyCert: { type: "string", format: "binary" },
         taxCert: { type: "string", format: "binary" },
       },

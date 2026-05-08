@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsEnum, IsNotEmpty, IsString } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsEnum, IsNotEmpty, IsString, ValidateIf } from 'class-validator';
 
 export enum RegisterKind {
   ENTERPRISE = 'ENTERPRISE',
@@ -7,6 +7,12 @@ export enum RegisterKind {
   INDIVIDUAL = 'INDIVIDUAL',
   LOGISTIC_SERVICE_PROVIDER = 'LOGISTIC_SERVICE_PROVIDER',
   LAST_MILE_DELIVERY = 'LAST_MILE_DELIVERY',
+}
+
+export enum RegisterRole {
+  CROSS_BORDER_LOGISTICS = 'CROSS_BORDER_LOGISTICS',
+  TRANSPORTER = 'TRANSPORTER',
+  LAST_MILE_PROVIDER = 'LAST_MILE_PROVIDER',
 }
 
 export class RegisterCompanyDto {
@@ -42,4 +48,14 @@ export class RegisterCompanyDto {
   @IsEnum(RegisterKind)
   @IsNotEmpty()
   kind!: RegisterKind;
+
+  @ApiPropertyOptional({
+    enum: RegisterRole,
+    example: RegisterRole.TRANSPORTER,
+    description: 'Required only when kind is LOGISTIC_SERVICE_PROVIDER',
+  })
+  @ValidateIf((dto) => dto.kind === RegisterKind.LOGISTIC_SERVICE_PROVIDER)
+  @IsEnum(RegisterRole)
+  @IsNotEmpty()
+  role?: RegisterRole;
 }
