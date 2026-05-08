@@ -30,6 +30,7 @@ import {
 			  emailAddress: true,
 			  businessName: true,
 			  businessAddress: true,
+			  role: true,
 			  createdAt: true,
 			},
 		  },
@@ -56,6 +57,7 @@ import {
 			  emailAddress: user.company.emailAddress,
 			  businessName: user.company.businessName,
 			  businessAddress: user.company.businessAddress,
+			  role: user.company.role,
 			  accountCreated: user.company.createdAt,
 			}
 		  : null,

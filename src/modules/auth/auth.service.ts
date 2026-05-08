@@ -17,7 +17,10 @@ import {
   import { ConfigService } from "@nestjs/config";
   import type { StorageService } from "../../common/storage/storage.interface";
   import { MailService } from "../../common/mail/mail.service";
-  import { RegisterCompanyDto } from "./dto/register-company.dto";
+  import {
+	RegisterCompanyDto,
+	RegisterKind,
+  } from "./dto/register-company.dto";
   
   @Injectable()
   export class AuthService {
@@ -44,6 +47,24 @@ import {
 	  }
 	) {
 	  if (!dto.kind) throw new BadRequestException("User kind is required");
+  
+	  if (
+		dto.kind === RegisterKind.LOGISTIC_SERVICE_PROVIDER &&
+		!dto.role
+	  ) {
+		throw new BadRequestException(
+		  "role is required when kind is LOGISTIC_SERVICE_PROVIDER"
+		);
+	  }
+  
+	  if (
+		dto.kind !== RegisterKind.LOGISTIC_SERVICE_PROVIDER &&
+		dto.role
+	  ) {
+		throw new BadRequestException(
+		  "role is only allowed when kind is LOGISTIC_SERVICE_PROVIDER"
+		);
+	  }
   
 	  const existingUser = await this.prisma.user.findUnique({
 		where: { email: dto.emailAddress },
@@ -124,6 +145,10 @@ import {
 			  emailAddress: dto.emailAddress,
 			  businessName: dto.businessName,
 			  businessAddress: dto.businessAddress,
+			  role:
+				dto.kind === RegisterKind.LOGISTIC_SERVICE_PROVIDER
+				  ? dto.role
+				  : null,
 			  documents: {
 				create: results.map((r, idx) => ({
 				  type:
