@@ -1,15 +1,15 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { Resend } from "resend";
 import { ConfigService } from "@nestjs/config";
 import fs from "fs";
 import path from "path";
 import Handlebars from "handlebars";
 import mjml2html from "mjml";
 import juice from "juice";
+import nodemailer, { Transporter } from "nodemailer";
 
 @Injectable()
 export class MailService {
-  private resend: Resend;
+  private transporter: Transporter;
   private logger = new Logger(MailService.name);
   private templatesDir: string;
 
@@ -17,11 +17,27 @@ export class MailService {
     this.templatesDir = this.findTemplatesDir();
     this.logger.log(`Using templates directory: ${this.templatesDir}`);
 
-    const apiKey = this.cfg.get<string>("RESEND_API_KEY");
-    if (!apiKey) {
-      this.logger.warn("RESEND_API_KEY not set — emails will fail until configured");
+    const host = this.cfg.get<string>("MAIL_HOST");
+    const port = Number(this.cfg.get<string>("MAIL_PORT") ?? 587);
+    const user = this.cfg.get<string>("MAIL_USER");
+    const pass = this.cfg.get<string>("MAIL_PASS");
+
+    if (!host || !user || !pass) {
+      this.logger.warn(
+        "Mailtrap SMTP config missing. Set MAIL_HOST, MAIL_PORT, MAIL_USER and MAIL_PASS."
+      );
     }
-    this.resend = new Resend(apiKey ?? "");
+
+    this.transporter = nodemailer.createTransport({
+      host: host ?? "live.smtp.mailtrap.io",
+      port,
+      secure: port === 465,
+      auth: {
+        user: user ?? "",
+        pass: pass ?? "",
+      },
+      requireTLS: port !== 465,
+    });
 
     this.testConnection();
   }
@@ -36,9 +52,12 @@ export class MailService {
 
     for (const dirPath of possiblePaths) {
       this.logger.log(`Checking for templates at: ${dirPath}`);
+
       if (fs.existsSync(dirPath)) {
         const files = fs.readdirSync(dirPath);
-        this.logger.log(`Found templates directory with files: ${files.join(", ")}`);
+        this.logger.log(
+          `Found templates directory with files: ${files.join(", ")}`
+        );
         return dirPath;
       }
     }
@@ -48,20 +67,38 @@ export class MailService {
     );
   }
 
-  private testConnection() {
-    const apiKey = this.cfg.get<string>("RESEND_API_KEY");
-    if (!apiKey) {
-      this.logger.error("Resend API key missing (RESEND_API_KEY). Set it in environment.");
-    } else {
-      // We don't send a test email automatically to avoid spamming.
-      this.logger.log("Resend configured (RESEND_API_KEY present). Verify sending domain in Resend dashboard.");
+  private async testConnection() {
+    const host = this.cfg.get<string>("MAIL_HOST");
+    const user = this.cfg.get<string>("MAIL_USER");
+    const pass = this.cfg.get<string>("MAIL_PASS");
+
+    if (!host || !user || !pass) {
+      this.logger.error(
+        "Mailtrap SMTP credentials missing. Emails will fail until configured."
+      );
+      return;
+    }
+
+    try {
+      await this.transporter.verify();
+      this.logger.log(
+        "Mailtrap SMTP configured successfully. SMTP connection verified."
+      );
+    } catch (error: any) {
+      this.logger.error(
+        `Mailtrap SMTP verification failed: ${error?.message ?? error}`
+      );
     }
   }
 
   private loadTemplate(templateName: string) {
     try {
       const mjmlPath = path.join(this.templatesDir, `${templateName}.mjml`);
-      const txtPath = path.join(this.templatesDir, "text", `${templateName}.txt.hbs`);
+      const txtPath = path.join(
+        this.templatesDir,
+        "text",
+        `${templateName}.txt.hbs`
+      );
 
       this.logger.log(`Loading MJML from: ${mjmlPath}`);
       this.logger.log(`Loading text template from: ${txtPath}`);
@@ -71,9 +108,12 @@ export class MailService {
       }
 
       const mjmlSource = fs.readFileSync(mjmlPath, "utf8");
-      const txtSource = fs.existsSync(txtPath) ? fs.readFileSync(txtPath, "utf8") : "";
+      const txtSource = fs.existsSync(txtPath)
+        ? fs.readFileSync(txtPath, "utf8")
+        : "";
 
       this.logger.log(`Successfully loaded template: ${templateName}`);
+
       return { mjmlSource, txtSource };
     } catch (err) {
       this.logger.error(
@@ -100,8 +140,10 @@ export class MailService {
       const fullCtx = {
         year: new Date().getFullYear(),
         appName: this.cfg.get("APP_NAME") ?? "Hage Logistics",
-        logoUrl: this.cfg.get("APP_LOGO") ?? `${this.cfg.get("APP_URL")}/logo.png`,
-        supportText: this.cfg.get("SUPPORT_TEXT") ?? "Need help? Contact hello@tryhage.com",
+        logoUrl:
+          this.cfg.get("APP_LOGO") ?? `${this.cfg.get("APP_URL")}/logo.png`,
+        supportText:
+          this.cfg.get("SUPPORT_TEXT") ?? "Need help? Contact hello@tryhage.com",
         ...context,
       };
 
@@ -110,38 +152,41 @@ export class MailService {
       const { html, errors } = mjml2html(mjmlWithVars, {
         validationLevel: "soft",
       });
+
       if (errors && errors.length) {
         this.logger.warn("MJML warnings: " + JSON.stringify(errors));
       }
 
       const inlined = juice(html);
 
-      const text = txtSource ? this.compile(txtSource, fullCtx) : this.stripHtmlToText(inlined);
+      const text = txtSource
+        ? this.compile(txtSource, fullCtx)
+        : this.stripHtmlToText(inlined);
 
-      const from = this.cfg.get("MAIL_FROM");
+      const from = this.cfg.get<string>("MAIL_FROM");
+
       if (!from) {
         throw new Error("MAIL_FROM is not configured");
       }
 
-      // Send via Resend SDK
-      const { data, error } = await this.resend.emails.send({
+      const result = await this.transporter.sendMail({
         from,
-        to: [to],
+        to,
         subject,
         html: inlined,
         text,
       });
 
-      if (error) {
-        this.logger.error(`Resend error sending email: ${JSON.stringify(error)}`);
-        throw new Error(error?.message ?? "Unknown resend error");
-      }
+      this.logger.verbose(
+        `Email sent to ${to} via Mailtrap SMTP. messageId=${result.messageId}`
+      );
 
-      this.logger.verbose(`Email sent to ${to} (id=${data?.id})`);
-      return data;
+      return result;
     } catch (err) {
       this.logger.error(
-        `Failed to send email [template=${templateName}, to=${to}]: ${(err as any).message}`
+        `Failed to send email [template=${templateName}, to=${to}]: ${
+          (err as any).message
+        }`
       );
       throw err;
     }
@@ -151,7 +196,6 @@ export class MailService {
     return html.replace(/<\/?[^>]+(>|$)/g, "").replace(/\s+/g, " ").trim();
   }
 
-  // convenience helpers
   async sendVerificationEmail(email: string, context: any) {
     const subject = `${this.cfg.get("APP_NAME")}: Verify your email`;
     return this.sendFromTemplate(email, subject, "verification", context);
@@ -163,17 +207,26 @@ export class MailService {
   }
 
   async sendShipmentCreated(email: string, context: any) {
-    const subject = `${this.cfg.get("APP_NAME")}: Shipment ${context.trackingNumber} created`;
+    const subject = `${this.cfg.get("APP_NAME")}: Shipment ${
+      context.trackingNumber
+    } created`;
     return this.sendFromTemplate(email, subject, "shipment-created", context);
   }
 
   async sendShipmentStatusUpdate(email: string, context: any) {
-    const subject = `${this.cfg.get("APP_NAME")}: Shipment ${context.trackingNumber} status updated`;
-    return this.sendFromTemplate(email, subject, "shipment-status-update", context);
+    const subject = `${this.cfg.get("APP_NAME")}: Shipment ${
+      context.trackingNumber
+    } status updated`;
+    return this.sendFromTemplate(
+      email,
+      subject,
+      "shipment-status-update",
+      context
+    );
   }
 
   async sendWaitlistAdminNotification(to: string, context: any) {
     const subject = `${this.cfg.get("APP_NAME")}: New Marketplace Waitlist Entry`;
     return this.sendFromTemplate(to, subject, "join-waitlist", context);
-  }  
+  }
 }
