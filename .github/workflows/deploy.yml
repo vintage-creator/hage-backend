@@ -1,0 +1,1105 @@
+name: Build and Deploy to App Runner
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+on:
+  push:
+    branches: [ main, develop, prerelease ]
+  pull_request:
+    types: [opened, synchronize, closed]
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM UTC
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'build'
+        type: choice
+        options:
+          - build
+          - deploy
+          - rollback
+      environment:
+        description: 'Environment to target'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+          - both
+      image_tag:
+        description: 'Custom image tag (for build/deploy) or target image tag (for rollback)'
+        required: false
+        type: string
+      rollback_to_image:
+        description: 'Full image URI to rollback to'
+        required: false
+        type: string
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+
+jobs:
+  determine-strategy:
+    name: Determine Build Strategy
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.strategy.outputs.should_build }}
+      should_deploy: ${{ steps.strategy.outputs.should_deploy }}
+      should_rollback: ${{ steps.strategy.outputs.should_rollback }}
+      environment: ${{ steps.strategy.outputs.environment }}
+      deploy_to_dev: ${{ steps.strategy.outputs.deploy_to_dev }}
+      deploy_to_prod: ${{ steps.strategy.outputs.deploy_to_prod }}
+      image_tag: ${{ steps.strategy.outputs.image_tag }}
+      rollback_image: ${{ steps.strategy.outputs.rollback_image }}
+      branch_name: ${{ steps.strategy.outputs.branch_name }}
+      is_pr: ${{ steps.strategy.outputs.is_pr }}
+    steps:
+      - name: Determine strategy
+        id: strategy
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            action="${{ github.event.inputs.action }}"
+            environment="${{ github.event.inputs.environment }}"
+            image_tag="${{ github.event.inputs.image_tag }}"
+            rollback_image="${{ github.event.inputs.rollback_to_image }}"
+            
+            echo "should_build=$([ "$action" = "build" ] || [ "$action" = "deploy" ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
+            echo "should_deploy=$([ "$action" = "deploy" ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
+            echo "should_rollback=$([ "$action" = "rollback" ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
+            echo "environment=$environment" >> $GITHUB_OUTPUT
+            
+            if [ "$environment" = "both" ]; then
+              echo "deploy_to_dev=true" >> $GITHUB_OUTPUT
+              echo "deploy_to_prod=true" >> $GITHUB_OUTPUT
+            elif [ "$environment" = "dev" ]; then
+              echo "deploy_to_dev=true" >> $GITHUB_OUTPUT
+              echo "deploy_to_prod=false" >> $GITHUB_OUTPUT
+            elif [ "$environment" = "prod" ]; then
+              echo "deploy_to_dev=false" >> $GITHUB_OUTPUT
+              echo "deploy_to_prod=true" >> $GITHUB_OUTPUT
+            fi
+            
+            echo "image_tag=$image_tag" >> $GITHUB_OUTPUT
+            echo "rollback_image=$rollback_image" >> $GITHUB_OUTPUT
+            echo "branch_name=manual" >> $GITHUB_OUTPUT
+            echo "is_pr=false" >> $GITHUB_OUTPUT
+          else
+            branch_name="${{ github.ref_name }}"
+            is_pr="${{ github.event_name == 'pull_request' }}"
+            
+            if [ "$branch_name" = "main" ]; then
+              echo "should_build=true" >> $GITHUB_OUTPUT
+              echo "should_deploy=true" >> $GITHUB_OUTPUT
+              echo "should_rollback=false" >> $GITHUB_OUTPUT
+              echo "environment=dev" >> $GITHUB_OUTPUT
+              echo "deploy_to_dev=true" >> $GITHUB_OUTPUT
+              echo "deploy_to_prod=false" >> $GITHUB_OUTPUT
+              echo "image_tag=main-${{ github.sha }}" >> $GITHUB_OUTPUT
+            elif [ "$branch_name" = "develop" ]; then
+              echo "should_build=true" >> $GITHUB_OUTPUT
+              echo "should_deploy=true" >> $GITHUB_OUTPUT
+              echo "should_rollback=false" >> $GITHUB_OUTPUT
+              echo "environment=dev" >> $GITHUB_OUTPUT
+              echo "deploy_to_dev=true" >> $GITHUB_OUTPUT
+              echo "deploy_to_prod=false" >> $GITHUB_OUTPUT
+              echo "image_tag=develop-${{ github.sha }}" >> $GITHUB_OUTPUT
+            elif [ "$branch_name" = "prerelease" ]; then
+              echo "should_build=true" >> $GITHUB_OUTPUT
+              echo "should_deploy=true" >> $GITHUB_OUTPUT
+              echo "should_rollback=false" >> $GITHUB_OUTPUT
+              echo "environment=preview" >> $GITHUB_OUTPUT
+              echo "deploy_to_dev=true" >> $GITHUB_OUTPUT
+              echo "deploy_to_prod=false" >> $GITHUB_OUTPUT
+              echo "image_tag=prerelease-${{ github.sha }}" >> $GITHUB_OUTPUT
+            else
+              echo "should_build=true" >> $GITHUB_OUTPUT
+              echo "should_deploy=false" >> $GITHUB_OUTPUT
+              echo "should_rollback=false" >> $GITHUB_OUTPUT
+              echo "environment=dev" >> $GITHUB_OUTPUT
+              echo "deploy_to_dev=false" >> $GITHUB_OUTPUT
+              echo "deploy_to_prod=false" >> $GITHUB_OUTPUT
+              echo "image_tag=${branch_name//\//-}-${{ github.sha }}" >> $GITHUB_OUTPUT
+            fi
+            
+            echo "rollback_image=" >> $GITHUB_OUTPUT
+            echo "branch_name=$branch_name" >> $GITHUB_OUTPUT
+            echo "is_pr=$is_pr" >> $GITHUB_OUTPUT
+          fi
+          
+          # Handle scheduled cleanup
+          if [ "${{ github.event_name }}" = 'schedule' ]; then
+            echo "should_build=false" >> $GITHUB_OUTPUT
+            echo "should_deploy=false" >> $GITHUB_OUTPUT
+            echo "should_rollback=false" >> $GITHUB_OUTPUT
+            echo "environment=cleanup" >> $GITHUB_OUTPUT
+            echo "deploy_to_dev=false" >> $GITHUB_OUTPUT
+            echo "deploy_to_prod=false" >> $GITHUB_OUTPUT
+            echo "image_tag=" >> $GITHUB_OUTPUT
+            echo "rollback_image=" >> $GITHUB_OUTPUT
+            echo "branch_name=scheduled" >> $GITHUB_OUTPUT
+            echo "is_pr=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Handle pull requests
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            target_branch="${{ github.base_ref }}"
+            pr_number="${{ github.event.number }}"
+            pr_action="${{ github.event.action }}"
+            
+            # Only create services for opened/updated PRs, cleanup for closed PRs
+            if [ "$pr_action" = "opened" ] || [ "$pr_action" = "synchronize" ]; then
+              echo "should_build=true" >> $GITHUB_OUTPUT
+              echo "should_deploy=true" >> $GITHUB_OUTPUT
+              echo "should_rollback=false" >> $GITHUB_OUTPUT
+              echo "environment=preview" >> $GITHUB_OUTPUT
+              echo "deploy_to_dev=true" >> $GITHUB_OUTPUT
+              echo "deploy_to_prod=false" >> $GITHUB_OUTPUT
+              echo "image_tag=pr-$pr_number-${{ github.sha }}" >> $GITHUB_OUTPUT
+              echo "rollback_image=" >> $GITHUB_OUTPUT
+              echo "branch_name=pr-$pr_number" >> $GITHUB_OUTPUT
+              echo "is_pr=true" >> $GITHUB_OUTPUT
+            elif [ "$pr_action" = "closed" ]; then
+              echo "should_build=false" >> $GITHUB_OUTPUT
+              echo "should_deploy=false" >> $GITHUB_OUTPUT
+              echo "should_rollback=false" >> $GITHUB_OUTPUT
+              echo "environment=cleanup" >> $GITHUB_OUTPUT
+              echo "deploy_to_dev=false" >> $GITHUB_OUTPUT
+              echo "deploy_to_prod=false" >> $GITHUB_OUTPUT
+              echo "image_tag=" >> $GITHUB_OUTPUT
+              echo "rollback_image=" >> $GITHUB_OUTPUT
+              echo "branch_name=pr-$pr_number" >> $GITHUB_OUTPUT
+              echo "is_pr=true" >> $GITHUB_OUTPUT
+            else
+              # For other PR actions (labeled, assigned, etc.), just build
+              echo "should_build=true" >> $GITHUB_OUTPUT
+              echo "should_deploy=false" >> $GITHUB_OUTPUT
+              echo "should_rollback=false" >> $GITHUB_OUTPUT
+              echo "environment=none" >> $GITHUB_OUTPUT
+              echo "deploy_to_dev=false" >> $GITHUB_OUTPUT
+              echo "deploy_to_prod=false" >> $GITHUB_OUTPUT
+              echo "image_tag=pr-$pr_number-${{ github.sha }}" >> $GITHUB_OUTPUT
+              echo "rollback_image=" >> $GITHUB_OUTPUT
+              echo "branch_name=pr-$pr_number" >> $GITHUB_OUTPUT
+              echo "is_pr=true" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+  build-image:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: determine-strategy
+    if: needs.determine-strategy.outputs.should_build == 'true'
+    outputs:
+      image_repository: ${{ steps.meta.outputs.tags }}
+      image_tag: ${{ steps.meta.outputs.tags }}
+      primary_tag: ${{ steps.meta.outputs.primary_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-actions-service-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/hage-mvp-app-${{ env.AWS_ACCOUNT_ID }}
+          tags: |
+            type=raw,value=${{ needs.determine-strategy.outputs.image_tag }}
+            type=raw,value=latest,enable=${{ needs.determine-strategy.outputs.branch_name == 'main' }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-to-dev:
+    name: Deploy to Development
+    runs-on: ubuntu-latest
+    needs: [determine-strategy, build-image]
+    if: needs.determine-strategy.outputs.deploy_to_dev == 'true'
+    environment: development
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-actions-service-role
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      - name: Deploy to Development
+        run: |
+          ENVIRONMENT="dev"
+          ENV_TAG="$ENVIRONMENT"
+          
+          # Set image tag based on different scenarios
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+          elif [ "${{ needs.determine-strategy.outputs.should_build }}" = "true" ]; then
+            # Use the strategy image tag if available, otherwise use primary tag from build
+            if [ -n "${{ needs.determine-strategy.outputs.image_tag }}" ]; then
+              IMAGE_TAG="${{ needs.determine-strategy.outputs.image_tag }}"
+            else
+              IMAGE_TAG="${{ needs.build-image.outputs.primary_tag }}"
+            fi
+          else
+            # Fallback to strategy image tag
+            IMAGE_TAG="${{ needs.determine-strategy.outputs.image_tag }}"
+          fi
+          
+          # Ensure we have a valid image tag
+          if [ -z "$IMAGE_TAG" ]; then
+            echo "Error: No image tag specified"
+            exit 1
+          fi
+          
+          IMAGE_URI="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/hage-mvp-app-${{ env.AWS_ACCOUNT_ID }}:$IMAGE_TAG"
+          
+          # Determine service name based on branch/PR
+          if [ "${{ needs.determine-strategy.outputs.is_pr }}" = "true" ]; then
+            SERVICE_NAME="hage-mvp-app-pr-${{ github.event.number }}"
+            echo "Creating PR service for PR #${{ github.event.number }}"
+          elif [ "${{ needs.determine-strategy.outputs.branch_name }}" = "main" ]; then
+            SERVICE_NAME="hage-mvp-app-main"
+            echo "Creating main service"
+          elif [ "${{ needs.determine-strategy.outputs.branch_name }}" = "prerelease" ]; then
+            SERVICE_NAME="hage-mvp-app-prerelease"
+            echo "Creating prerelease service"
+          else
+            SERVICE_NAME="hage-mvp-app-dev"
+            echo "Creating dev service"
+          fi
+          
+          echo "Deploying to $ENVIRONMENT environment"
+          echo "Service: $SERVICE_NAME"
+          echo "Image: $IMAGE_URI"
+          
+          # Create JSON configuration file to avoid shell escaping issues
+          ACCESS_ROLE_ARN="arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/hage-mvp-dev-app-runner-service-role"
+          cat > apprunner-config.json << EOF
+          {
+            "ImageRepository": {
+              "ImageIdentifier": "$IMAGE_URI",
+              "ImageConfiguration": {
+                "Port": "3000",
+                "RuntimeEnvironmentVariables": {
+                  "NODE_ENV": "$ENVIRONMENT",
+                  "JWT_EXPIRES_IN": "15m",
+                  "REFRESH_EXPIRES_DAYS": "30",
+                  "SMTP_HOST": "email-smtp.us-east-1.amazonaws.com",
+                  "SMTP_PORT": "587",
+                  "MAIL_FROM": "Hage <tech@tryhage.com>",
+                  "APP_NAME": "Hage Logistics",
+                  "APP_URL": "${{ vars.APP_URL_DEV }}",
+                  "FRONTEND_URL": "${{ vars.FRONTEND_URL_DEV }}",
+                  "API_PREFIX": "/api",
+                  "APP_LOGO": "https://res.cloudinary.com/doam8l8j9/image/upload/v1760557572/hage_logo_1_vkocjc.png",
+                  "ENABLE_SEEDING": "true"
+                },
+                "RuntimeEnvironmentSecrets": {
+                  "DATABASE_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/rds/master-xRcVlo:DATABASE_URL::",
+                  "JWT_SECRET": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/jwt-secret-oqoaaG",
+                  "SMTP_USER": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/smtp-credentials-SkKPoV:user::",
+                  "SMTP_PASS": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/smtp-credentials-SkKPoV:pass::",
+                  "CLOUDINARY_CLOUD_NAME": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/cloudinary-credentials-ESKjAs:cloud_name::",
+                  "CLOUDINARY_API_KEY": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/cloudinary-credentials-ESKjAs:api_key::",
+                  "CLOUDINARY_API_SECRET": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/cloudinary-credentials-ESKjAs:api_secret::"
+                }
+              },
+              "ImageRepositoryType": "ECR"
+            },
+            "AuthenticationConfiguration": {
+              "AccessRoleArn": "$ACCESS_ROLE_ARN"
+            },
+            "AutoDeploymentsEnabled": false
+          }
+          EOF
+          
+          cat > health-check-config.json << EOF
+          {
+            "Protocol": "HTTP",
+            "Path": "/api/health",
+            "Interval": 10,
+            "Timeout": 5,
+            "HealthyThreshold": 2,
+            "UnhealthyThreshold": 5
+          }
+          EOF
+          
+          cat > instance-config.json << EOF
+          {
+            "Cpu": "0.25 vCPU",
+            "Memory": "0.5 GB",
+            "InstanceRoleArn": "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/hage-mvp-dev-app-runner-instance-role"
+          }
+          EOF
+
+
+          cat > network-config.json << EOF
+          {
+            "EgressConfiguration": {
+              "EgressType": "VPC",
+              "VpcConnectorArn": "arn:aws:apprunner:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:vpcconnector/hage-mvp-main-vpc-connector-v2/1/9b848ff85b954a7380544856e7c5dedd" 
+            }
+          }
+          EOF
+
+
+          # Check if service exists and create or update accordingly
+          SERVICE_ARN="arn:aws:apprunner:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:service/$SERVICE_NAME"
+          
+          if aws apprunner describe-service --service-arn "$SERVICE_ARN" > /dev/null 2>&1; then
+            echo "Service exists, updating..."
+            aws apprunner update-service \
+              --service-arn "$SERVICE_ARN" \
+              --source-configuration file://apprunner-config.json \
+              --health-check-configuration file://health-check-config.json \
+              --instance-configuration file://instance-config.json \
+              --network-configuration file://network-config.json
+              
+
+
+
+          else
+            echo "Service does not exist, creating..."
+            aws apprunner create-service \
+              --service-name "$SERVICE_NAME" \
+              --source-configuration file://apprunner-config.json \
+              --health-check-configuration file://health-check-config.json \
+              --instance-configuration file://instance-config.json \
+              --tags Key=Environment,Value="$ENV_TAG" Key=Project,Value=hage-mvp Key=Type,Value=api Key=ManagedBy,Value=github-actions Key=Tier,Value=app-runner \
+              --network-configuration file://network-config.json
+          fi
+
+          echo "Fetching service URL..."
+          SERVICE_INFO=$(aws apprunner describe-service \
+            --service-arn "$SERVICE_ARN" \
+            --region ${{ env.AWS_REGION }} \
+            --output json)
+
+          SERVICE_URL=$(echo "$SERVICE_INFO" | jq -r '.Service.ServiceUrl')
+
+          echo "Service URL: $SERVICE_URL"
+          echo "Note: Deployment takes approximately 10 minutes to complete."
+          echo "You can monitor the deployment progress in the AWS App Runner console:"
+          echo "   https://console.aws.amazon.com/apprunner/home?region=${{ env.AWS_REGION }}#/services"
+
+          # If this is a PR workflow, comment the URL on the PR
+          if [ "${{ needs.determine-strategy.outputs.is_pr }}" = "true" ]; then
+            echo "Commenting preview URL on PR #${{ github.event.number }}..."
+            echo "SERVICE_NAME=$SERVICE_NAME" >> $GITHUB_ENV
+            echo "SERVICE_URL=$SERVICE_URL" >> $GITHUB_ENV
+            echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          else
+              echo "Not a PR, skipping PR comment."
+          fi
+          
+          # Clean up temporary files
+          rm -f apprunner-config.json health-check-config.json instance-config.json network-config.json pr-comment.txt
+          
+          echo "Deployment initiated successfully"
+          echo "Service ARN: $SERVICE_ARN"
+          echo "URL: $SERVICE_URL"
+
+      - name: Comment PR with preview link
+        if: needs.determine-strategy.outputs.is_pr == 'true'
+        uses: actions/github-script@v7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          script: |
+            const serviceName = process.env.SERVICE_NAME;
+            const serviceUrl = process.env.SERVICE_URL;
+            const imageTag = process.env.IMAGE_TAG;
+            const prNumber = ${{ github.event.pull_request.number }};
+            const commitSha = '${{ github.sha }}'.substring(0, 7);
+            
+            const comment = `## Preview Environment Ready!
+            
+            **Service:** \`${serviceName}\`
+            **API Base URL:** \`https://${serviceUrl}/api\`
+            **API Documentation:** [View API Docs](https://${serviceUrl}/api/docs)
+            **Health Check:** [Check Health](https://${serviceUrl}/api/health)
+            **AWS Console:** [View in AWS Console](https://console.aws.amazon.com/apprunner/home?region=${{ env.AWS_REGION }}#/services)
+            
+            ### Deployment Status
+            - Deployment takes approximately 10 minutes to complete
+            - Check the AWS App Runner console for real-time status
+            - Monitor logs in the AWS console for any issues
+            
+            **Commit:** \`${commitSha}\`
+            **Tag:** \`${imageTag}\`
+            
+            ---
+            *This preview will be automatically cleaned up when the PR is closed.*`;
+            
+            github.rest.issues.createComment({
+              issue_number: prNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  deploy-to-prod:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [determine-strategy, build-image]
+    if: needs.determine-strategy.outputs.deploy_to_prod == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-actions-service-role
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      - name: Deploy to Production
+        run: |
+          ENVIRONMENT="prod"
+          ENV_TAG="$ENVIRONMENT"
+          
+          # Set image tag based on different scenarios
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+          elif [ "${{ needs.determine-strategy.outputs.should_build }}" = "true" ]; then
+            # Use the strategy image tag if available, otherwise use primary tag from build
+            if [ -n "${{ needs.determine-strategy.outputs.image_tag }}" ]; then
+              IMAGE_TAG="${{ needs.determine-strategy.outputs.image_tag }}"
+            else
+              IMAGE_TAG="${{ needs.build-image.outputs.primary_tag }}"
+            fi
+          else
+            # Fallback to strategy image tag
+            IMAGE_TAG="${{ needs.determine-strategy.outputs.image_tag }}"
+          fi
+          
+          # Ensure we have a valid image tag
+          if [ -z "$IMAGE_TAG" ]; then
+            echo "Error: No image tag specified"
+            exit 1
+          fi
+          
+          IMAGE_URI="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/hage-mvp-app-${{ env.AWS_ACCOUNT_ID }}:$IMAGE_TAG"
+          SERVICE_NAME="hage-mvp-app-prod"
+          
+          echo "Deploying to $ENVIRONMENT environment"
+          echo "Service: $SERVICE_NAME"
+          echo "Image: $IMAGE_URI"
+          
+          # Create JSON configuration file to avoid shell escaping issues
+          ACCESS_ROLE_ARN="arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/hage-mvp-prod-app-runner-service-role"
+          cat > apprunner-config.json << EOF
+          {
+            "ImageRepository": {
+              "ImageIdentifier": "$IMAGE_URI",
+              "ImageConfiguration": {
+                "Port": "3000",
+                "RuntimeEnvironmentVariables": {
+                  "NODE_ENV": "$ENVIRONMENT",
+                  "JWT_EXPIRES_IN": "15m",
+                  "REFRESH_EXPIRES_DAYS": "30",
+                  "SMTP_HOST": "email-smtp.us-east-1.amazonaws.com",
+                  "SMTP_PORT": "587",
+                  "MAIL_FROM": "Hage <tech@tryhage.com>",
+                  "APP_NAME": "Hage Logistics",
+                  "APP_URL": "${{ vars.APP_URL_PROD }}",
+                  "FRONTEND_URL": "${{ vars.FRONTEND_URL_PROD }}",
+                  "API_PREFIX": "/api",
+                  "APP_LOGO": "https://res.cloudinary.com/doam8l8j9/image/upload/v1760557572/hage_logo_1_vkocjc.png",
+                  "ENABLE_SEEDING": "${{ vars.ENABLE_PROD_SEEDING || 'false' }}"
+                },
+                "RuntimeEnvironmentSecrets": {
+                  "DATABASE_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/rds/master-xRcVlo:DATABASE_URL::",
+                  "JWT_SECRET": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/jwt-secret-VfHP6e",
+                  "SMTP_USER": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/smtp-credentials-gb9ius:user::",
+                  "SMTP_PASS": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/smtp-credentials-gb9ius:pass::",
+                  "CLOUDINARY_CLOUD_NAME": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/cloudinary-credentials-rzQzW0:cloud_name::",
+                  "CLOUDINARY_API_KEY": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/cloudinary-credentials-rzQzW0:api_key::",
+                  "CLOUDINARY_API_SECRET": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/cloudinary-credentials-rzQzW0:api_secret::"
+                }
+              },
+              "ImageRepositoryType": "ECR"
+            },
+            "AuthenticationConfiguration": {
+              "AccessRoleArn": "$ACCESS_ROLE_ARN"
+            },
+            "AutoDeploymentsEnabled": false
+          }
+          EOF
+          
+          cat > health-check-config.json << EOF
+          {
+            "Protocol": "HTTP",
+            "Path": "/api/health",
+            "Interval": 10,
+            "Timeout": 5,
+            "HealthyThreshold": 2,
+            "UnhealthyThreshold": 5
+          }
+          EOF
+          
+          cat > instance-config.json << EOF
+          {
+            "Cpu": "0.25 vCPU",
+            "Memory": "0.5 GB",
+            "InstanceRoleArn": "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/hage-mvp-prod-app-runner-instance-role"
+          }
+          EOF
+
+          cat > network-config.json << EOF
+          {
+            "EgressConfiguration": {
+              "EgressType": "VPC",
+              "VpcConnectorArn": "arn:aws:apprunner:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:vpcconnector/hage-mvp-main-vpc-connector-v2/1/9b848ff85b954a7380544856e7c5dedd" 
+            }
+          }
+          EOF
+          
+          aws apprunner update-service \
+            --service-arn "arn:aws:apprunner:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:service/$SERVICE_NAME" \
+            --source-configuration file://apprunner-config.json \
+            --health-check-configuration file://health-check-config.json \
+            --instance-configuration file://instance-config.json \
+            --network-configuration file://network-config.json
+          
+          # Clean up temporary files
+          rm -f apprunner-config.json health-check-config.json instance-config.json network-config.json
+          
+          echo "Deployment initiated successfully"
+          echo "Service ARN: arn:aws:apprunner:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:service/$SERVICE_NAME"
+
+  rollback-dev:
+    name: Rollback Development
+    runs-on: ubuntu-latest
+    needs: determine-strategy
+    if: needs.determine-strategy.outputs.should_rollback == 'true' && needs.determine-strategy.outputs.deploy_to_dev == 'true'
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-actions-service-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify rollback image exists
+        id: verify-image
+        run: |
+          ROLLBACK_IMAGE="${{ needs.determine-strategy.outputs.rollback_image }}"
+          
+          if [ -z "$ROLLBACK_IMAGE" ]; then
+            echo "Error: No rollback image specified"
+            exit 1
+          fi
+          
+          REPO_NAME="hage-mvp-app-${{ env.AWS_ACCOUNT_ID }}"
+          IMAGE_TAG=$(echo $ROLLBACK_IMAGE | cut -d':' -f2)
+          
+          echo "Verifying image exists: $ROLLBACK_IMAGE"
+          
+          if aws ecr describe-images \
+            --repository-name $REPO_NAME \
+            --image-ids imageTag=$IMAGE_TAG \
+            --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
+            echo "Image verification successful"
+            echo "image_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Error: Image $ROLLBACK_IMAGE does not exist in ECR"
+            echo "image_exists=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Get database credentials from AWS Secrets Manager
+        id: get-secrets-rollback-dev
+        run: |
+          echo "Retrieving database credentials from AWS Secrets Manager for rollback..."
+          
+          # Get the database credentials from Secrets Manager and construct connection string
+          DB_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/rds/master-xRcVlo" \
+            --region eu-west-2 \
+            --query 'SecretString' \
+            --output text)
+          
+          # Parse the JSON secret and construct DATABASE_URL
+          DB_USERNAME=$(echo "$DB_SECRET" | jq -r '.username')
+          DB_PASSWORD=$(echo "$DB_SECRET" | jq -r '.password')
+          DB_HOST=$(echo "$DB_SECRET" | jq -r '.host')
+          DB_PORT=$(echo "$DB_SECRET" | jq -r '.port')
+          DB_NAME=$(echo "$DB_SECRET" | jq -r '.dbname')
+          
+          # Construct the DATABASE_URL
+          DATABASE_URL="postgresql://$DB_USERNAME:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME"
+          
+          echo "Database URL constructed successfully for rollback"
+          echo "DATABASE_URL=$DATABASE_URL" >> $GITHUB_ENV
+          
+
+      - name: Rollback Development service
+        if: steps.verify-image.outputs.image_exists == 'true'
+        run: |
+          ENVIRONMENT="dev"
+          ROLLBACK_IMAGE="${{ needs.determine-strategy.outputs.rollback_image }}"
+          
+          # Determine service name based on branch
+          if [ "${{ needs.determine-strategy.outputs.branch_name }}" = "main" ]; then
+            SERVICE_NAME="hage-mvp-app-main"
+            echo "Rolling back main service"
+          else
+            SERVICE_NAME="hage-mvp-app-dev"
+            echo "Rolling back dev service"
+          fi
+          
+          echo "Rolling back $ENVIRONMENT environment to: $ROLLBACK_IMAGE"
+          echo "Service: $SERVICE_NAME"
+          
+          # Create JSON configuration file to avoid shell escaping issues
+          cat > apprunner-config.json << EOF
+          {
+            "ImageRepository": {
+              "ImageIdentifier": "$ROLLBACK_IMAGE",
+              "ImageConfiguration": {
+                "Port": "3000",
+                "RuntimeEnvironmentVariables": {
+                  "NODE_ENV": "$ENVIRONMENT",
+                  "JWT_EXPIRES_IN": "15m",
+                  "REFRESH_EXPIRES_DAYS": "30",
+                  "SMTP_HOST": "email-smtp.us-east-1.amazonaws.com",
+                  "SMTP_PORT": "587",
+                  "MAIL_FROM": "Hage <tech@tryhage.com>",
+                  "APP_NAME": "Hage Logistics",
+                  "APP_URL": "${{ vars.APP_URL_DEV }}",
+                  "FRONTEND_URL": "${{ vars.FRONTEND_URL_DEV }}",
+                  "API_PREFIX": "/api",
+                  "APP_LOGO": "https://res.cloudinary.com/doam8l8j9/image/upload/v1760557572/hage_logo_1_vkocjc.png",
+                  "ENABLE_SEEDING": "true"
+                },
+                "RuntimeEnvironmentSecrets": {
+                  "DATABASE_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/rds/master-xRcVlo:DATABASE_URL::",
+                  "JWT_SECRET": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/jwt-secret-oqoaaG",
+                  "SMTP_USER": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/smtp-credentials-SkKPoV:user::",
+                  "SMTP_PASS": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/smtp-credentials-SkKPoV:pass::",
+                  "CLOUDINARY_CLOUD_NAME": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/cloudinary-credentials-ESKjAs:cloud_name::",
+                  "CLOUDINARY_API_KEY": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/cloudinary-credentials-ESKjAs:api_key::",
+                  "CLOUDINARY_API_SECRET": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/cloudinary-credentials-ESKjAs:api_secret::"
+                }
+              },
+              "ImageRepositoryType": "ECR"
+            },
+            "AutoDeploymentsEnabled": false
+          }
+          EOF
+          
+          cat > health-check-config.json << EOF
+          {
+            "Protocol": "HTTP",
+            "Path": "/api/health",
+            "Interval": 10,
+            "Timeout": 5,
+            "HealthyThreshold": 2,
+            "UnhealthyThreshold": 5
+          }
+          EOF
+          
+          cat > instance-config.json << EOF
+          {
+            "Cpu": "0.25 vCPU",
+            "Memory": "0.5 GB",
+            "InstanceRoleArn": "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/hage-mvp-dev-app-runner-instance-role"
+          }
+          EOF
+
+          cat > network-config.json << EOF
+          {
+            "EgressConfiguration": {
+              "EgressType": "VPC",
+              "VpcConnectorArn": "arn:aws:apprunner:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:vpcconnector/hage-mvp-main-vpc-connector-v2/1/9b848ff85b954a7380544856e7c5dedd" 
+            }
+          }
+          EOF
+          
+          aws apprunner update-service \
+            --service-arn "arn:aws:apprunner:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:service/$SERVICE_NAME" \
+            --source-configuration file://apprunner-config.json \
+            --health-check-configuration file://health-check-config.json \
+            --instance-configuration file://instance-config.json \
+            --network-configuration file://network-config.json
+          
+          # Clean up temporary files
+          rm -f apprunner-config.json health-check-config.json instance-config.json network-config.json
+          
+          echo "Rollback initiated successfully"
+          echo "Service ARN: arn:aws:apprunner:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:service/$SERVICE_NAME"
+
+  rollback-prod:
+    name: Rollback Production
+    runs-on: ubuntu-latest
+    needs: determine-strategy
+    if: needs.determine-strategy.outputs.should_rollback == 'true' && needs.determine-strategy.outputs.deploy_to_prod == 'true'
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-actions-service-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify rollback image exists
+        id: verify-image
+        run: |
+          ROLLBACK_IMAGE="${{ needs.determine-strategy.outputs.rollback_image }}"
+          
+          if [ -z "$ROLLBACK_IMAGE" ]; then
+            echo "Error: No rollback image specified"
+            exit 1
+          fi
+          
+          REPO_NAME="hage-mvp-app-${{ env.AWS_ACCOUNT_ID }}"
+          IMAGE_TAG=$(echo $ROLLBACK_IMAGE | cut -d':' -f2)
+          
+          echo "Verifying image exists: $ROLLBACK_IMAGE"
+          
+          if aws ecr describe-images \
+            --repository-name $REPO_NAME \
+            --image-ids imageTag=$IMAGE_TAG \
+            --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
+            echo "Image verification successful"
+            echo "image_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Error: Image $ROLLBACK_IMAGE does not exist in ECR"
+            echo "image_exists=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Get database credentials from AWS Secrets Manager
+        id: get-secrets-rollback-prod
+        run: |
+          echo "Retrieving production database credentials from AWS Secrets Manager for rollback..."
+          
+          # Get the database credentials from Secrets Manager and construct connection string
+          DB_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/rds/master-xRcVlo" \
+            --region eu-west-2 \
+            --query 'SecretString' \
+            --output text)
+          
+          # Parse the JSON secret and construct DATABASE_URL
+          DB_USERNAME=$(echo "$DB_SECRET" | jq -r '.username')
+          DB_PASSWORD=$(echo "$DB_SECRET" | jq -r '.password')
+          DB_HOST=$(echo "$DB_SECRET" | jq -r '.host')
+          DB_PORT=$(echo "$DB_SECRET" | jq -r '.port')
+          DB_NAME=$(echo "$DB_SECRET" | jq -r '.dbname')
+          
+          # Construct the DATABASE_URL
+          DATABASE_URL="postgresql://$DB_USERNAME:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME"
+          
+          echo "Production database URL constructed successfully for rollback"
+          echo "DATABASE_URL=$DATABASE_URL" >> $GITHUB_ENV
+         
+
+      - name: Rollback Production service
+        if: steps.verify-image.outputs.image_exists == 'true'
+        run: |
+          ENVIRONMENT="prod"
+          ROLLBACK_IMAGE="${{ needs.determine-strategy.outputs.rollback_image }}"
+          SERVICE_NAME="hage-mvp-app-prod"
+          
+          echo "Rolling back $ENVIRONMENT environment to: $ROLLBACK_IMAGE"
+          echo "Service: $SERVICE_NAME"
+          
+          # Create JSON configuration file to avoid shell escaping issues
+          cat > apprunner-config.json << EOF
+          {
+            "ImageRepository": {
+              "ImageIdentifier": "$ROLLBACK_IMAGE",
+              "ImageConfiguration": {
+                "Port": "3000",
+                "RuntimeEnvironmentVariables": {
+                  "NODE_ENV": "$ENVIRONMENT",
+                  "JWT_EXPIRES_IN": "15m",
+                  "REFRESH_EXPIRES_DAYS": "30",
+                  "SMTP_HOST": "email-smtp.us-east-1.amazonaws.com",
+                  "SMTP_PORT": "587",
+                  "MAIL_FROM": "Hage <tech@tryhage.com>",
+                  "APP_NAME": "Hage Logistics",
+                  "APP_URL": "${{ vars.APP_URL_PROD }}",
+                  "FRONTEND_URL": "${{ vars.FRONTEND_URL_PROD }}",
+                  "API_PREFIX": "/api",
+                  "APP_LOGO": "https://res.cloudinary.com/doam8l8j9/image/upload/v1760557572/hage_logo_1_vkocjc.png",
+                  "ENABLE_SEEDING": "${{ vars.ENABLE_PROD_SEEDING || 'false' }}"
+                },
+                "RuntimeEnvironmentSecrets": {
+                  "DATABASE_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/rds/master-xRcVlo:DATABASE_URL::",
+                  "JWT_SECRET": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/jwt-secret-VfHP6e",
+                  "SMTP_USER": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/smtp-credentials-gb9ius:user::",
+                  "SMTP_PASS": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/smtp-credentials-gb9ius:pass::",
+                  "CLOUDINARY_CLOUD_NAME": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/cloudinary-credentials-rzQzW0:cloud_name::",
+                  "CLOUDINARY_API_KEY": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/cloudinary-credentials-rzQzW0:api_key::",
+                  "CLOUDINARY_API_SECRET": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/cloudinary-credentials-rzQzW0:api_secret::"
+                }
+              },
+              "ImageRepositoryType": "ECR"
+            },
+            "AutoDeploymentsEnabled": false
+          }
+          EOF
+          
+          cat > health-check-config.json << EOF
+          {
+            "Protocol": "HTTP",
+            "Path": "/api/health",
+            "Interval": 10,
+            "Timeout": 5,
+            "HealthyThreshold": 2,
+            "UnhealthyThreshold": 5
+          }
+          EOF
+          
+          cat > instance-config.json << EOF
+          {
+            "Cpu": "0.25 vCPU",
+            "Memory": "0.5 GB",
+            "InstanceRoleArn": "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/hage-mvp-dev-app-runner-instance-role"
+          }
+          EOF
+
+          cat > network-config.json << EOF
+          {
+            "EgressConfiguration": {
+              "EgressType": "VPC",
+              "VpcConnectorArn": "arn:aws:apprunner:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:vpcconnector/hage-mvp-main-vpc-connector-v2/1/9b848ff85b954a7380544856e7c5dedd" 
+            }
+          }
+          EOF
+          
+          aws apprunner update-service \
+            --service-arn "arn:aws:apprunner:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:service/$SERVICE_NAME" \
+            --source-configuration file://apprunner-config.json \
+            --health-check-configuration file://health-check-config.json \
+            --instance-configuration file://instance-config.json \
+            --network-configuration file://network-config.json
+          
+          # Clean up temporary files
+          rm -f apprunner-config.json health-check-config.json instance-config.json network-config.json
+          
+          echo "Rollback initiated successfully"
+          echo "Service ARN: arn:aws:apprunner:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:service/$SERVICE_NAME"
+
+  cleanup-pr-service:
+    name: Cleanup PR Service
+    runs-on: ubuntu-latest
+    needs: determine-strategy
+    if: needs.determine-strategy.outputs.is_pr == 'true' && needs.determine-strategy.outputs.environment == 'cleanup'
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-actions-service-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Delete PR service
+        run: |
+          PR_NUMBER=$(echo "${{ needs.determine-strategy.outputs.branch_name }}" | sed 's/pr-//')
+          SERVICE_NAME="hage-mvp-app-pr-$PR_NUMBER"
+          
+          echo "Cleaning up service for PR #$PR_NUMBER"
+          echo "Service name: $SERVICE_NAME"
+          
+          # Get the service ARN and status
+          SERVICE_INFO=$(aws apprunner list-services \
+            --region ${{ env.AWS_REGION }} \
+            --query "ServiceSummaryList[?ServiceName=='$SERVICE_NAME'].{Arn:ServiceArn,Status:Status}" \
+            --output json)
+          
+          if [ "$SERVICE_INFO" != "[]" ] && [ "$SERVICE_INFO" != "null" ]; then
+            SERVICE_ARN=$(echo "$SERVICE_INFO" | jq -r '.[0].Arn')
+            SERVICE_STATUS=$(echo "$SERVICE_INFO" | jq -r '.[0].Status')
+            
+            echo "Found service: $SERVICE_ARN"
+            echo "Service status: $SERVICE_STATUS"
+            
+            # Wait for service to be in a deletable state if it's still running
+            if [ "$SERVICE_STATUS" = "RUNNING" ]; then
+              echo "Service is running, stopping before deletion..."
+              aws apprunner pause-service \
+                --service-arn "$SERVICE_ARN" \
+                --region ${{ env.AWS_REGION }} || echo "Failed to pause service, continuing with deletion"
+              
+              # Wait for service to stop (max 2 minutes)
+              for i in {1..12}; do
+                CURRENT_STATUS=$(aws apprunner describe-service \
+                  --service-arn "$SERVICE_ARN" \
+                  --region ${{ env.AWS_REGION }} \
+                  --query 'Service.Status' \
+                  --output text)
+                
+                if [ "$CURRENT_STATUS" != "RUNNING" ]; then
+                  echo "Service stopped with status: $CURRENT_STATUS"
+                  break
+                fi
+                
+                echo "Waiting for service to stop... ($i/12)"
+                sleep 10
+              done
+            fi
+            
+            echo "Deleting service..."
+            aws apprunner delete-service \
+              --service-arn "$SERVICE_ARN" \
+              --region ${{ env.AWS_REGION }}
+            
+            echo "Service deleted successfully"
+            
+            # Also clean up associated ECR images for this PR
+            echo "Cleaning up ECR images for PR #$PR_NUMBER..."
+            aws ecr list-images \
+              --repository-name "hage-mvp-app-${{ env.AWS_ACCOUNT_ID }}" \
+              --region ${{ env.AWS_REGION }} \
+              --query "imageIds[?contains(imageTag, 'pr-$PR_NUMBER-')]" \
+              --output json > pr_images.json || echo "No PR images found"
+            
+            if [ -s pr_images.json ] && [ "$(cat pr_images.json)" != "[]" ]; then
+              echo "Found PR images to delete:"
+              cat pr_images.json | jq -r '.[] | .imageTag'
+              
+              aws ecr batch-delete-image \
+                --repository-name "hage-mvp-app-${{ env.AWS_ACCOUNT_ID }}" \
+                --region ${{ env.AWS_REGION }} \
+                --image-ids file://pr_images.json || echo "Failed to delete some images"
+              
+              echo "ECR images cleaned up"
+            else
+              echo "No PR-specific images found"
+            fi
+            
+            rm -f pr_images.json
+          else
+            echo "Service $SERVICE_NAME not found - may have been already deleted"
+          fi
+
+  scheduled-cleanup:
+    name: Scheduled Cleanup
+    runs-on: ubuntu-latest
+    needs: determine-strategy
+    if: github.event_name == 'schedule'
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-actions-service-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Cleanup orphaned preview services
+        run: |
+          echo "Running scheduled cleanup of orphaned preview services..."
+          
+          # Get all preview services with more detailed info
+          SERVICES=$(aws apprunner list-services \
+            --region ${{ env.AWS_REGION }} \
+            --query "ServiceSummaryList[?contains(ServiceName, \`hage-mvp-app-pr-\`) || contains(ServiceName, \`hage-mvp-app-prerelease\`)].{Name:ServiceName,Arn:ServiceArn,CreatedAt:CreatedAt,Status:Status}" \
+            --output json)
+          
+          echo "Found preview services:"
+          echo "$SERVICES" | jq -r '.[] | "  - \(.Name) (Status: \(.Status), Created: \(.CreatedAt))"'
+          
+          CLEANUP_COUNT=0
+          ERROR_COUNT=0
+          
+          # Delete services older than 7 days
+          echo "$SERVICES" | jq -r ".[] | select(.CreatedAt != null) | select(.Name != null) | .Arn + \"|\" + .CreatedAt + \"|\" + .Name + \"|\" + .Status" | while read line; do
+            service_arn=$(echo "$line" | cut -d"|" -f1)
+            created_at=$(echo "$line" | cut -d"|" -f2)
+            service_name=$(echo "$line" | cut -d"|" -f3)
+            service_status=$(echo "$line" | cut -d"|" -f4)
+            
+            # Convert to timestamp and check if older than 7 days
+            created_timestamp=$(date -d "$created_at" +%s)
+            seven_days_ago=$(date -d "7 days ago" +%s)
+            
+            if [ "$created_timestamp" -lt "$seven_days_ago" ]; then
+              echo "Deleting old service: $service_name (created: $created_at, status: $service_status)"
+              
+              # Pause service before deletion if it's running
+              if [ "$service_status" = "RUNNING" ]; then
+                echo "  Stopping service before deletion..."
+                aws apprunner pause-service --service-arn "$service_arn" --region ${{ env.AWS_REGION }} || echo "  Failed to pause service, continuing with deletion"
+                sleep 5
+              fi
+              
+              if aws apprunner delete-service --service-arn "$service_arn" --region ${{ env.AWS_REGION }}; then
+                echo "  Successfully deleted $service_name"
+                CLEANUP_COUNT=$((CLEANUP_COUNT + 1))
+              else
+                echo "  Failed to delete $service_name"
+                ERROR_COUNT=$((ERROR_COUNT + 1))
+              fi
+            else
+              echo "  Keeping service: $service_name (created: $created_at - less than 7 days old)"
+            fi
+          done
+          
+          echo "Cleanup Summary:"
+          echo "  - Services deleted: $CLEANUP_COUNT"
+          echo "  - Errors encountered: $ERROR_COUNT"
+          
+          # Also clean up orphaned ECR images older than 7 days
+          echo "Cleaning up orphaned ECR images..."
+          ECR_CLEANUP_COUNT=0
+          
+          REPO_NAME="hage-mvp-app-${{ env.AWS_ACCOUNT_ID }}"
+          IMAGE_DETAILS=$(aws ecr describe-images \
+            --repository-name "$REPO_NAME" \
+            --region ${{ env.AWS_REGION }} \
+            --query 'imageDetails[?imagePushedAt!=null && imageTags!=null]' \
+            --output json)
+          
+          echo "$IMAGE_DETAILS" | jq -r '.[] | select((.imageTags[]? | startswith("pr-")) or (.imageTags[]? | startswith("prerelease-"))) | (.imageTags[]? | select(startswith("pr-") or startswith("prerelease-"))) + "|" + (.imagePushedAt|tostring)' | while read line; do
+            image_tag=$(echo "$line" | cut -d"|" -f1)
+            pushed_at=$(echo "$line" | cut -d"|" -f2)
+            
+            pushed_timestamp=$(date -d "$pushed_at" +%s)
+            seven_days_ago=$(date -d "7 days ago" +%s)
+            
+            if [ "$pushed_timestamp" -lt "$seven_days_ago" ]; then
+              echo "Deleting old image: $image_tag (pushed: $pushed_at)"
+              if aws ecr batch-delete-image \
+                --repository-name "$REPO_NAME" \
+                --region ${{ env.AWS_REGION }} \
+                --image-ids imageTag="$image_tag"; then
+                echo "  Successfully deleted image: $image_tag"
+                ECR_CLEANUP_COUNT=$((ECR_CLEANUP_COUNT + 1))
+              else
+                echo "  Failed to delete image: $image_tag"
+              fi
+            fi
+          done
+          
+          echo "ECR Cleanup Summary:"
+          echo "  - Images deleted: $ECR_CLEANUP_COUNT"
