@@ -319,7 +319,7 @@ jobs:
                   "MAIL_USER": "${{ vars.MAIL_USER_DEV || vars.MAIL_USER }}",
                   "MAIL_PASS": "${{ vars.MAIL_PASS_DEV || vars.MAIL_PASS }}",
                   "APP_NAME": "Hage Logistics",
-                  "APP_URL": "${{ vars.APP_URL_DEV }}",
+                  "APP_URL": "${{ vars.APP_URL_DEV || vars.APP_URL }}",
                   "FRONTEND_URL": "${{ vars.FRONTEND_URL_DEV }}",
                   "API_PREFIX": "/api",
                   "APP_LOGO": "https://res.cloudinary.com/doam8l8j9/image/upload/v1760557572/hage_logo_1_vkocjc.png",
