@@ -13,14 +13,22 @@ export class MailService {
   private logger = new Logger(MailService.name);
   private templatesDir: string;
 
+  /** App Runner injects into `process.env`; ConfigService usually matches, but keep a fallback. */
+  private mailEnv(name: string): string | undefined {
+    const raw = this.cfg.get<string>(name) ?? process.env[name];
+    if (raw === undefined || raw === null) return undefined;
+    const s = String(raw).trim();
+    return s.length ? s : undefined;
+  }
+
   constructor(private cfg: ConfigService) {
     this.templatesDir = this.findTemplatesDir();
     this.logger.log(`Using templates directory: ${this.templatesDir}`);
 
-    const host = this.cfg.get<string>("MAIL_HOST");
-    const port = Number(this.cfg.get<string>("MAIL_PORT") ?? 587);
-    const user = this.cfg.get<string>("MAIL_USER");
-    const pass = this.cfg.get<string>("MAIL_PASS");
+    const host = this.mailEnv("MAIL_HOST");
+    const port = Number(this.mailEnv("MAIL_PORT") ?? "587");
+    const user = this.mailEnv("MAIL_USER");
+    const pass = this.mailEnv("MAIL_PASS");
 
     if (!host || !user || !pass) {
       this.logger.warn(
@@ -68,9 +76,9 @@ export class MailService {
   }
 
   private async testConnection() {
-    const host = this.cfg.get<string>("MAIL_HOST");
-    const user = this.cfg.get<string>("MAIL_USER");
-    const pass = this.cfg.get<string>("MAIL_PASS");
+    const host = this.mailEnv("MAIL_HOST");
+    const user = this.mailEnv("MAIL_USER");
+    const pass = this.mailEnv("MAIL_PASS");
 
     if (!host || !user || !pass) {
       this.logger.error(
@@ -163,7 +171,7 @@ export class MailService {
         ? this.compile(txtSource, fullCtx)
         : this.stripHtmlToText(inlined);
 
-      const from = this.cfg.get<string>("MAIL_FROM");
+      const from = this.mailEnv("MAIL_FROM");
 
       if (!from) {
         throw new Error("MAIL_FROM is not configured");

@@ -89,6 +89,7 @@ The deploy workflow uses GitHub Actions secrets/variables:
 
 - **Secrets**: `AWS_ACCOUNT_ID`
 - **Variables**: `AWS_REGION`, `APP_URL_DEV`, `APP_URL_PROD`, `FRONTEND_URL_DEV`, `FRONTEND_URL_PROD`, `ENABLE_PROD_SEEDING` (optional)
+- **Mail (injected into App Runner as plain env from repo Variables)**: `MAIL_HOST_DEV`, `MAIL_PORT_DEV`, `MAIL_FROM_DEV`, `MAIL_USER_DEV`, `MAIL_PASS_DEV`, and the `_PROD` equivalents for production deploy/rollback. These are **not** GitHub Secrets; anyone with repo settings access can read them. Prefer Secrets Manager + `RuntimeEnvironmentSecrets` for real credentials if you tighten security later.
 
 ### 4. Setup Database
 

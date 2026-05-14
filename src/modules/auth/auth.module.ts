@@ -7,7 +7,6 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { CloudinaryService } from '../../common/storage/cloudinary.service';
-import { MailService } from '../../common/mail/mail.service';
 import TokenService from './token.service';
 import UrlService from './url.service';
 import { VerifyController } from './verify.controller';
@@ -31,7 +30,6 @@ import { ResetController } from './reset.controller';
   providers: [
     AuthService,
     JwtStrategy,
-    MailService,
     TokenService,
     UrlService,
     { provide: 'StorageService', useClass: CloudinaryService },

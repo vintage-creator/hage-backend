@@ -12,11 +12,13 @@ import { InventoryModule } from "./modules/inventory/inventory.module";
 import { ProfileModule } from './modules/profile/profile.module';
 import { MarketplaceWaitlistModule } from "./modules/marketplace-waitlist/marketplace-waitlist.module";
 import { HealthModule } from "./health/health.module";
+import { MailModule } from "./common/mail/mail.module";
 
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    MailModule,
     PrismaModule,
     AuthModule,
     ShipmentsModule,
