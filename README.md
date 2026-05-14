@@ -79,10 +79,7 @@ These are the main runtime variables used by the API (locally and in App Runner)
 - **Database**: `DATABASE_URL`
 - **Auth**: `JWT_SECRET`, `JWT_EXPIRES_IN`, `REFRESH_EXPIRES_DAYS`
 - **URLs/branding**: `APP_NAME`, `APP_URL`, `FRONTEND_URL`, `API_PREFIX`, `APP_LOGO`
-- **Email**:
-  - Required: `MAIL_FROM`
-  - Optional (provider): `RESEND_API_KEY` (app will start without it, but sending emails will fail)
-  - Optional (SMTP): `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`
+- **Email** (Mailtrap SMTP via `MailService` / nodemailer): `MAIL_HOST`, `MAIL_PORT`, `MAIL_USER`, `MAIL_PASS`, `MAIL_FROM`
 - **Storage**: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
 - **App Runner startup controls**: `ENABLE_SEEDING`, `FORCE`
 
