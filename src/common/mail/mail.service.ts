@@ -171,10 +171,13 @@ export class MailService {
         ? this.compile(txtSource, fullCtx)
         : this.stripHtmlToText(inlined);
 
-      const from = this.mailEnv("MAIL_FROM");
-
-      if (!from) {
-        throw new Error("MAIL_FROM is not configured");
+      const configuredFrom = this.mailEnv("MAIL_FROM");
+      const from =
+        configuredFrom ?? "Hage <no-reply@tryhage.com>";
+      if (!configuredFrom) {
+        this.logger.warn(
+          "MAIL_FROM not set; using default Hage <no-reply@tryhage.com>. Set MAIL_FROM in App Runner or GitHub variable MAIL_FROM_DEV / MAIL_FROM_PROD."
+        );
       }
 
       const result = await this.transporter.sendMail({
