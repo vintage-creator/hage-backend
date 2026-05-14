@@ -13,7 +13,15 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.setGlobalPrefix("api", {
     exclude: ['verify-email', 'reset-password'],
-  });  
+  });
+
+  const port = Number(process.env.PORT || 3000);
+  // Listen before Swagger: createDocument() reflects the whole app and can take
+  // a long time on small CPUs; App Runner health checks need the port open first.
+  await app.listen(port, "0.0.0.0");
+  console.log(
+    `Server listening on http://0.0.0.0:${port}/ (loading API docs next...)`
+  );
 
   const config = new DocumentBuilder()
     .setTitle("Hage Logistics API")
@@ -28,13 +36,7 @@ async function bootstrap() {
 
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup("api/docs", app, document);
-
-  const port = Number(process.env.PORT || 3000);
-  // App Runner / Docker must accept traffic on all interfaces (not only loopback).
-  await app.listen(port, "0.0.0.0");
-  console.log(
-    `Server listening on http://0.0.0.0:${port}/ (Swagger: /api/docs)`
-  );
+  console.log("Swagger UI ready at /api/docs");
 }
 
 bootstrap().catch((err) => {
