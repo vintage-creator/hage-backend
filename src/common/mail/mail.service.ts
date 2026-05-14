@@ -9,7 +9,6 @@ import nodemailer, { Transporter } from "nodemailer";
 
 @Injectable()
 export class MailService {
-  private transporter: Transporter;
   private logger = new Logger(MailService.name);
   private templatesDir: string;
 
@@ -21,12 +20,35 @@ export class MailService {
     return s.length ? s : undefined;
   }
 
+  /** Build transporter from current env (call at send time so creds are not fixed at empty startup). */
+  private createTransporter(): Transporter {
+    const host = this.mailEnv("MAIL_HOST") ?? "live.smtp.mailtrap.io";
+    const port = Number(this.mailEnv("MAIL_PORT") ?? "587");
+    const user = this.mailEnv("MAIL_USER");
+    const pass = this.mailEnv("MAIL_PASS");
+
+    if (!user || !pass) {
+      throw new Error(
+        "SMTP credentials missing: set MAIL_USER and MAIL_PASS on the service. " +
+          "For GitHub deploys, define repository variables MAIL_USER_DEV and MAIL_PASS_DEV " +
+          "(or MAIL_USER_PROD / MAIL_PASS_PROD for production)."
+      );
+    }
+
+    return nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      auth: { user, pass },
+      requireTLS: port !== 465,
+    });
+  }
+
   constructor(private cfg: ConfigService) {
     this.templatesDir = this.findTemplatesDir();
     this.logger.log(`Using templates directory: ${this.templatesDir}`);
 
     const host = this.mailEnv("MAIL_HOST");
-    const port = Number(this.mailEnv("MAIL_PORT") ?? "587");
     const user = this.mailEnv("MAIL_USER");
     const pass = this.mailEnv("MAIL_PASS");
 
@@ -35,17 +57,6 @@ export class MailService {
         "Mailtrap SMTP config missing. Set MAIL_HOST, MAIL_PORT, MAIL_USER and MAIL_PASS."
       );
     }
-
-    this.transporter = nodemailer.createTransport({
-      host: host ?? "live.smtp.mailtrap.io",
-      port,
-      secure: port === 465,
-      auth: {
-        user: user ?? "",
-        pass: pass ?? "",
-      },
-      requireTLS: port !== 465,
-    });
 
     this.testConnection();
   }
@@ -88,11 +99,21 @@ export class MailService {
     }
 
     try {
-      await this.transporter.verify();
+      const t = this.createTransporter();
+      await t.verify();
       this.logger.log(
         "Mailtrap SMTP configured successfully. SMTP connection verified."
       );
     } catch (error: any) {
+      if (
+        typeof error?.message === "string" &&
+        error.message.includes("SMTP credentials missing")
+      ) {
+        this.logger.error(
+          "Mailtrap SMTP credentials missing. Emails will fail until configured."
+        );
+        return;
+      }
       this.logger.error(
         `Mailtrap SMTP verification failed: ${error?.message ?? error}`
       );
@@ -180,7 +201,9 @@ export class MailService {
         );
       }
 
-      const result = await this.transporter.sendMail({
+      const transport = this.createTransporter();
+
+      const result = await transport.sendMail({
         from,
         to,
         subject,
