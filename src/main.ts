@@ -30,10 +30,14 @@ async function bootstrap() {
   SwaggerModule.setup("api/docs", app, document);
 
   const port = Number(process.env.PORT || 3000);
-  await app.listen(port);
+  // App Runner / Docker must accept traffic on all interfaces (not only loopback).
+  await app.listen(port, "0.0.0.0");
   console.log(
-    `Server listening on http://localhost:${port}/ (Swagger: /api/docs)`
+    `Server listening on http://0.0.0.0:${port}/ (Swagger: /api/docs)`
   );
 }
 
-bootstrap();
+bootstrap().catch((err) => {
+  console.error("Fatal bootstrap error:", err);
+  process.exit(1);
+});

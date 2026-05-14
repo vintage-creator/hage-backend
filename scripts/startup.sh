@@ -21,11 +21,18 @@ echo "Using DATABASE_URL host (redacted): ${DATABASE_URL%%/*}********"
 # 2. Wait for DB to be ready
 #
 echo "Waiting for database to accept connections..."
+MAX_DB_WAIT_ATTEMPTS="${MAX_DB_WAIT_ATTEMPTS:-60}"
+db_attempt=0
 until npx prisma db execute --url "$DATABASE_URL" --stdin <<'SQL' > /dev/null 2>&1
 SELECT 1;
 SQL
 do
-  echo "DB not ready yet, waiting 5 seconds..."
+  db_attempt=$((db_attempt + 1))
+  if [ "$db_attempt" -ge "$MAX_DB_WAIT_ATTEMPTS" ]; then
+    echo "ERROR: Database unreachable after $db_attempt attempts (~$((db_attempt * 5))s). Check DATABASE_URL, security groups, and VPC connector."
+    exit 1
+  fi
+  echo "DB not ready yet, waiting 5 seconds... ($db_attempt/$MAX_DB_WAIT_ATTEMPTS)"
   sleep 5
 done
 echo "DB connection OK"

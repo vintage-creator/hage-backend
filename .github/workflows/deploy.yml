@@ -346,10 +346,10 @@ jobs:
           {
             "Protocol": "HTTP",
             "Path": "/api/health",
-            "Interval": 10,
-            "Timeout": 5,
+            "Interval": 15,
+            "Timeout": 10,
             "HealthyThreshold": 2,
-            "UnhealthyThreshold": 5
+            "UnhealthyThreshold": 10
           }
           EOF
           
@@ -561,10 +561,10 @@ jobs:
           {
             "Protocol": "HTTP",
             "Path": "/api/health",
-            "Interval": 10,
-            "Timeout": 5,
+            "Interval": 15,
+            "Timeout": 10,
             "HealthyThreshold": 2,
-            "UnhealthyThreshold": 5
+            "UnhealthyThreshold": 10
           }
           EOF
           
@@ -722,10 +722,10 @@ jobs:
           {
             "Protocol": "HTTP",
             "Path": "/api/health",
-            "Interval": 10,
-            "Timeout": 5,
+            "Interval": 15,
+            "Timeout": 10,
             "HealthyThreshold": 2,
-            "UnhealthyThreshold": 5
+            "UnhealthyThreshold": 10
           }
           EOF
           
@@ -875,10 +875,10 @@ jobs:
           {
             "Protocol": "HTTP",
             "Path": "/api/health",
-            "Interval": 10,
-            "Timeout": 5,
+            "Interval": 15,
+            "Timeout": 10,
             "HealthyThreshold": 2,
-            "UnhealthyThreshold": 5
+            "UnhealthyThreshold": 10
           }
           EOF
           
