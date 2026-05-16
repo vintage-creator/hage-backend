@@ -10,14 +10,26 @@ export class UrlService {
 		return (this.cfg.get("APP_URL") ?? "http://localhost:3000").replace(/\/+$/, "");
 	}
 
+	/**
+	 * Public site origin for email links (verify / reset).
+	 * Prefers FRONTEND_URL; never appends API_PREFIX.
+	 * Strips a trailing /api segment when APP_URL was mis-set to the API path.
+	 */
+	private normalizePublicBase() {
+		const raw =
+			this.cfg.get<string>("FRONTEND_URL")?.trim() ||
+			this.cfg.get<string>("APP_URL")?.trim() ||
+			"http://localhost:3000";
+		return raw.replace(/\/api\/?$/i, "").replace(/\/+$/, "");
+	}
+
 	normalizePrefix() {
 		const apiPrefix = (this.cfg.get("API_PREFIX") ?? "").replace(/\/+$/, "");
 		return apiPrefix ? (apiPrefix.startsWith("/") ? apiPrefix : `/${apiPrefix}`) : "";
 	}
 
-	/** Email links (verify / reset) are pages on APP_URL, not under API_PREFIX. */
 	private appPage(path: string, token?: string) {
-		const base = this.normalizeBase();
+		const base = this.normalizePublicBase();
 		const p = path.startsWith("/") ? path.slice(1) : path;
 		const q = token ? `?token=${encodeURIComponent(token)}` : "";
 		return `${base}/${p}${q}`;
