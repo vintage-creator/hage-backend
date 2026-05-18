@@ -88,13 +88,20 @@ import {
 		  }
   
 		  await this.tokenService.deleteVerificationTokensByUser(existingUser.id);
-		  const tokenRec = await this.tokenService.createVerificationToken(existingUser.id);
-		  const verificationUrl = this.urlService.verificationUrl(tokenRec.token);
+		  const isEnterprise = existingUser.kind === RegisterKind.ENTERPRISE;
+		  const tokenRec = isEnterprise
+			? await this.tokenService.createVerificationCode(existingUser.id)
+			: await this.tokenService.createVerificationToken(existingUser.id);
+		  const verificationUrl = isEnterprise
+			? undefined
+			: this.urlService.verificationUrl(tokenRec.token);
   
 		  const emailContext = {
 			fullName: dto.fullName ?? existingUser.email,
 			businessName: dto.businessName ?? "",
 			verificationUrl,
+			verificationCode: isEnterprise ? tokenRec.token : undefined,
+			phoneNumber: dto.phoneNumber,
 		  };
   
 		  try {
@@ -115,7 +122,9 @@ import {
   
 		  return {
 			ok: true,
-			message: "Account exists but not verified — verification email resent.",
+			message: isEnterprise
+			  ? "Account exists but not verified — verification code resent."
+			  : "Account exists but not verified — verification email resent.",
 		  };
 		}
   
@@ -123,12 +132,12 @@ import {
 	  }
   
 	  const uploadPromises: Promise<any>[] = [];
-	  if (files.companyCert) {
+	  if (files?.companyCert) {
 		uploadPromises.push(
 		  this.storage.uploadFile(files.companyCert, { folder: "company-docs" })
 		);
 	  }
-	  if (files.taxCert) {
+	  if (files?.taxCert) {
 		uploadPromises.push(
 		  this.storage.uploadFile(files.taxCert, { folder: "company-docs" })
 		);
@@ -177,13 +186,20 @@ import {
 		  };
 		});
   
-		const tokenRec = await this.tokenService.createVerificationToken(user.id);
-		const verificationUrl = this.urlService.verificationUrl(tokenRec.token);
+		const isEnterprise = dto.kind === RegisterKind.ENTERPRISE;
+		const tokenRec = isEnterprise
+		  ? await this.tokenService.createVerificationCode(user.id)
+		  : await this.tokenService.createVerificationToken(user.id);
+		const verificationUrl = isEnterprise
+		  ? undefined
+		  : this.urlService.verificationUrl(tokenRec.token);
   
 		const emailContext = {
 		  fullName: dto.fullName,
 		  businessName: dto.businessName,
 		  verificationUrl,
+		  verificationCode: isEnterprise ? tokenRec.token : undefined,
+		  phoneNumber: dto.phoneNumber,
 		};
   
 		try {
@@ -213,7 +229,10 @@ import {
 		  );
 		}
   
-		return { ok: true };
+		return {
+		  ok: true,
+		  verificationMethod: isEnterprise ? "CODE" : "EMAIL_LINK",
+		};
 	  } catch (err: any) {
 		if (err?.code === "P2002") {
 		  throw new BadRequestException("Email or phone already registered");
@@ -237,6 +256,40 @@ import {
 		token: rec.token,
 	  };
 	}
+
+	async verifyEnterprisePhoneCode(emailAddress: string, verificationCode: string) {
+	  if (!emailAddress) throw new BadRequestException("Missing emailAddress");
+	  if (!verificationCode) throw new BadRequestException("Missing verificationCode");
+
+	  const normalizedEmail = emailAddress.trim().toLowerCase();
+	  const rec = await this.tokenService.findVerificationTokenForEmail(
+		normalizedEmail,
+		verificationCode
+	  );
+
+	  if (!rec || rec.expiresAt < new Date()) {
+		throw new BadRequestException("Invalid or expired verification code");
+	  }
+
+	  if (rec.user?.kind !== RegisterKind.ENTERPRISE) {
+		throw new BadRequestException("Verification code is only supported for enterprise accounts");
+	  }
+
+	  const setupToken = randomBytes(24).toString("hex");
+	  const updatedRec = await this.prisma.verificationToken.update({
+		where: { id: rec.id },
+		data: { token: setupToken },
+	  });
+
+	  return {
+		ok: true,
+		email: rec.user.email ?? null,
+		phone: rec.user.phone ?? null,
+		companyId: rec.user.companyId ?? null,
+		expiresAt: updatedRec.expiresAt,
+		verificationToken: updatedRec.token,
+	  };
+	}
   
 	async verifyResetToken(token: string) {
 	  if (!token) throw new BadRequestException("Missing token");
@@ -256,6 +309,9 @@ import {
 	async setPassword(verificationToken: string, password: string, retype: string) {
 	  if (password !== retype) throw new BadRequestException("Passwords do not match");
 	  if (!isStrongPassword(password)) throw new BadRequestException("Password is not strong enough");
+	  if (/^\d{4}$/.test(verificationToken)) {
+		throw new BadRequestException("Verify the code before setting a password");
+	  }
   
 	  const rec = await this.tokenService.findVerificationToken(verificationToken);
 	  if (!rec || rec.expiresAt < new Date()) throw new BadRequestException("Invalid or expired token");

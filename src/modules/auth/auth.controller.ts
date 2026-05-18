@@ -30,6 +30,7 @@ import { CreatePasswordDto } from "./dto/create-password.dto";
 import { LoginDto } from "./dto/login.dto";
 import { ForgotPasswordRequestDto } from "./dto/forgot-password-request.dto";
 import { LogoutDto } from "./dto/logout.dto";
+import { VerifyEnterprisePhoneCodeDto } from "./dto/verify-enterprise-phone-code.dto";
 
 type FileFilterCallback = (error: Error | null, acceptFile: boolean) => void;
 
@@ -61,7 +62,7 @@ export class AuthController {
   @ApiConsumes("multipart/form-data")
   @ApiResponse({
     status: 201,
-    description: "Registration accepted; verify email",
+    description: "Registration accepted; verify email or enterprise code",
   })
   @UseInterceptors(
     FileFieldsInterceptor(
@@ -116,8 +117,6 @@ export class AuthController {
         "businessName",
         "businessAddress",
         "kind",
-        "companyCert",
-        "taxCert",
       ],
     },
   })
@@ -131,16 +130,35 @@ export class AuthController {
   ) {
     if (!dto.kind) throw new BadRequestException("User kind is required");
 
-    if (!files || !files.companyCert?.[0] || !files.taxCert?.[0]) {
+    if (
+      dto.kind !== RegisterKind.ENTERPRISE &&
+      (!files || !files.companyCert?.[0] || !files.taxCert?.[0])
+    ) {
       throw new BadRequestException(
         "companyCert and taxCert files are required (fields: companyCert, taxCert)"
       );
     }
 
     return this.auth.registerCompany(dto, {
-      companyCert: files.companyCert[0],
-      taxCert: files.taxCert[0],
+      companyCert: files?.companyCert?.[0],
+      taxCert: files?.taxCert?.[0],
     });
+  }
+
+  @Post("verify-enterprise-phone-code")
+  @ApiOperation({
+    summary: "Verify enterprise onboarding phone code sent by email",
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Code verified — use returned verificationToken to set password",
+  })
+  @HttpCode(HttpStatus.OK)
+  async verifyEnterprisePhoneCode(@Body() dto: VerifyEnterprisePhoneCodeDto) {
+    return this.auth.verifyEnterprisePhoneCode(
+      dto.emailAddress,
+      dto.verificationCode
+    );
   }
 
   @Post("set-password")

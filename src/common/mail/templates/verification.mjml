@@ -16,8 +16,8 @@
 
   <mj-body background-color="#F5F7FA">
     <!-- Logo Section -->
-    <mj-section padding="20px 24px 0 24px" text-align="center">
-      <mj-column background-color="#050301" border-radius="10px" vertical-align="middle" padding="0">
+    <mj-section background-color="#050301" padding="14px 24px" text-align="center">
+      <mj-column vertical-align="middle" padding="0">
         <mj-image css-class="logo-img" width="80px" src="{{logoUrl}}" alt="{{appName}}" padding="6px 8px" />
       </mj-column>
     </mj-section>
@@ -30,9 +30,22 @@
 
         <mj-text font-size="16px" color="#374151" padding-top="8px" line-height="1.4">
           Thanks for registering your company <strong>{{businessName}}</strong>.
+          {{#if verificationCode}}
+          To complete your registration, enter the 4 digit code below in the app.
+          {{else}}
           To complete your registration, please verify your email address by clicking the button below.
+          {{/if}}
         </mj-text>
 
+        {{#if verificationCode}}
+        <mj-text align="center" font-size="28px" font-weight="700" color="#111827" letter-spacing="8px" padding="20px 0 6px 0">
+          {{verificationCode}}
+        </mj-text>
+
+        <mj-text color="#6B7280" align="center" font-size="13px" padding-top="0">
+          This code expires in 15 minutes.
+        </mj-text>
+        {{else}}
         <mj-button mj-class="btn" href="{{verificationUrl}}" target="_blank" padding-top="18px">
           Verify email
         </mj-button>
@@ -44,6 +57,7 @@
         <mj-text font-size="12px" color="#3A8156">
           <span class="break-word">{{verificationUrl}}</span>
         </mj-text>
+        {{/if}}
 
         <mj-divider border-color="#E5E7EB" padding="20px 0" />
 

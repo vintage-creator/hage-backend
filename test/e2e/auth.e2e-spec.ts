@@ -8,7 +8,7 @@ import { MailService } from "../../src/common/mail/mail.service";
 
 jest.setTimeout(120000);
 
-describe("Auth (e2e) — register / verify / set-password / login", () => {
+describe("Auth (e2e) — register / code verify / set-password / login", () => {
   let app: INestApplication;
   let prisma: PrismaService;
 
@@ -78,7 +78,7 @@ describe("Auth (e2e) — register / verify / set-password / login", () => {
     }
   });
 
-  it("full flow: register-company -> verify-email -> set-password -> login", async () => {
+  it("full enterprise flow: register-company -> verify code -> set-password -> login", async () => {
     const email = `e2e-auth-${Date.now()}@example.com`;
     const payload = {
       fullName: "E2E Company Owner",
@@ -87,10 +87,9 @@ describe("Auth (e2e) — register / verify / set-password / login", () => {
       businessName: "E2E Company Ltd",
       businessAddress: "123 Test St",
       kind: "ENTERPRISE",
-      role: "CROSS_BORDER_LOGISTICS",
     };
 
-    // 1) Register company (multipart form with two files)
+    // 1) Register enterprise company (no document upload required)
     const registerRes = await request(app.getHttpServer())
       .post("/api/auth/register-company")
       .field("fullName", payload.fullName)
@@ -99,13 +98,11 @@ describe("Auth (e2e) — register / verify / set-password / login", () => {
       .field("businessName", payload.businessName)
       .field("businessAddress", payload.businessAddress)
       .field("kind", payload.kind)
-      .field("role", payload.role)
-      // Attach dummy buffers; storage is mocked so these won't be uploaded to Cloudinary
-      .attach("companyCert", Buffer.from("dummy company cert"), "company.pdf")
-      .attach("taxCert", Buffer.from("dummy tax cert"), "tax.pdf")
       .expect(201);
 
-    expect(registerRes.body).toEqual(expect.objectContaining({ ok: true }));
+    expect(registerRes.body).toEqual(
+      expect.objectContaining({ ok: true, verificationMethod: "CODE" })
+    );
 
     // 2) Find created user + verification token in DB
     const user = await prisma.user.findUnique({ where: { email } });
@@ -116,27 +113,29 @@ describe("Auth (e2e) — register / verify / set-password / login", () => {
       orderBy: { createdAt: "desc" },
     });
     expect(vtokenRec).toBeDefined();
-    const token = vtokenRec!.token;
+    const code = vtokenRec!.token;
+    expect(code).toMatch(/^\d{4}$/);
 
-    // 3) GET verify-email (validate token)
-    const verifyRes = await request(app.getHttpServer())
-      .get(`/verify-email?token=${encodeURIComponent(token)}`)
+    // 3) Verify enterprise code
+    const codeVerifyRes = await request(app.getHttpServer())
+      .post("/api/auth/verify-enterprise-phone-code")
+      .send({ emailAddress: email, verificationCode: code })
       .expect(200);
 
-    expect(verifyRes.body).toEqual(
+    expect(codeVerifyRes.body).toEqual(
       expect.objectContaining({
         ok: true,
         email,
-        token,
       })
     );
+    expect(codeVerifyRes.body.verificationToken).toMatch(/^[a-f0-9]{48}$/);
 
     // 4) Set password
     const newPassword = "Str0ngP@ssword!";
     const setPassRes = await request(app.getHttpServer())
       .post("/api/auth/set-password")
       .send({
-        verificationToken: token,
+        verificationToken: codeVerifyRes.body.verificationToken,
         password: newPassword,
         retypePassword: newPassword,
       })

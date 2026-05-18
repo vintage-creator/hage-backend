@@ -1,7 +1,7 @@
 // src/modules/auth/token.service.ts
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
-import { randomBytes } from "crypto";
+import { randomBytes, randomInt } from "crypto";
 import { add } from "date-fns";
 
 @Injectable()
@@ -17,6 +17,25 @@ export class TokenService {
     return { id: rec.id, token: rec.token, expiresAt: rec.expiresAt };
   }
 
+  async createVerificationCode(userId: string, minutes = 15) {
+    const expiresAt = add(new Date(), { minutes });
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const token = randomInt(0, 10000).toString().padStart(4, "0");
+
+      try {
+        const rec = await this.prisma.verificationToken.create({
+          data: { userId, token, expiresAt },
+        });
+        return { id: rec.id, token: rec.token, expiresAt: rec.expiresAt };
+      } catch (err: any) {
+        if (err?.code !== "P2002") throw err;
+      }
+    }
+
+    throw new Error("Could not create a unique verification code");
+  }
+
   async createPasswordResetToken(userId: string, hours = 2) {
     const token = randomBytes(24).toString("hex");
     const expiresAt = add(new Date(), { hours });
@@ -30,6 +49,17 @@ export class TokenService {
     return this.prisma.verificationToken.findUnique({
       where: { token },
       include: { user: true },
+    });
+  }
+
+  async findVerificationTokenForEmail(email: string, token: string) {
+    return this.prisma.verificationToken.findFirst({
+      where: {
+        token,
+        user: { email: { equals: email, mode: "insensitive" } },
+      },
+      include: { user: true },
+      orderBy: { createdAt: "desc" },
     });
   }
 
