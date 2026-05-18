@@ -39,6 +39,28 @@ export class ProfileController {
 		return this.profileService.getProfile(user.sub);
 	}
 
+	@Get("dashboard")
+	@ApiOperation({ summary: "Get profile dashboard with shipment stats" })
+	@ApiResponse({
+		status: 200,
+		description: "Returns business name, user kind, and shipment counts (delivered, pending, failed)",
+		schema: {
+			example: {
+				businessName: "Bidex Enterprise",
+				kind: "ENTERPRISE",
+				dashboard: {
+					delivered: 52,
+					pending: 16,
+					failed: 8,
+				},
+			},
+		},
+	})
+	async getDashboard(@Req() req: Request) {
+		const user = (req as any).user;
+		return this.profileService.getDashboard(user.sub);
+	}
+
 	@Post("picture")
 	@ApiOperation({ summary: "Upload or update profile picture" })
 	@ApiConsumes("multipart/form-data")
