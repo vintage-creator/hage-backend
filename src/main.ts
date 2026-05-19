@@ -15,7 +15,12 @@ async function bootstrap() {
     exclude: ['verify-email', 'reset-password'],
   });  
 
-  const config = new DocumentBuilder()
+  const swaggerServerUrl =
+    process.env.SWAGGER_SERVER_URL ||
+    process.env.APP_URL ||
+    (process.env.NODE_ENV === "production" ? "https://api.tryhage.com" : undefined);
+
+  const swaggerBuilder = new DocumentBuilder()
     .setTitle("Hage Logistics API")
     .setDescription("MVP backend for Hage Logistics")
     .setVersion("1.0")
@@ -23,8 +28,13 @@ async function bootstrap() {
     .addBearerAuth(
       { type: "http", scheme: "bearer", bearerFormat: "JWT" },
       "access-token"
-    )
-    .build();
+    );
+
+  if (swaggerServerUrl) {
+    swaggerBuilder.addServer(swaggerServerUrl.replace(/\/+$/, ""));
+  }
+
+  const config = swaggerBuilder.build();
 
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup("api/docs", app, document);

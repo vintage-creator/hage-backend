@@ -30,6 +30,39 @@ import {
 	private usesCodeVerification(kind?: string | null) {
 	  return kind === RegisterKind.ENTERPRISE || kind === RegisterKind.INDIVIDUAL;
 	}
+
+	private normalizeRegistration(dto: RegisterCompanyDto) {
+	  const isIndividual = dto.kind === RegisterKind.INDIVIDUAL;
+	  const isEnterprise = dto.kind === RegisterKind.ENTERPRISE;
+	  const fullName = (dto.fullName ?? dto.name ?? dto.companyName ?? dto.businessName)?.trim();
+	  const phoneNumber = (dto.phoneNumber ?? dto.companyPhoneNumber)?.trim();
+	  const emailAddress = (dto.emailAddress ?? dto.companyEmailAddress)?.trim().toLowerCase();
+	  const businessName = (
+		dto.businessName ??
+		dto.companyName ??
+		(isIndividual ? dto.name : undefined) ??
+		fullName
+	  )?.trim();
+	  const businessAddress = (
+		dto.businessAddress ??
+		dto.physicalAddress ??
+		dto.companyAddress
+	  )?.trim();
+	  const country = dto.country?.trim();
+	  const language = dto.language?.trim();
+
+	  return {
+		isIndividual,
+		isEnterprise,
+		fullName,
+		phoneNumber,
+		emailAddress,
+		businessName,
+		businessAddress,
+		country,
+		language,
+	  };
+	}
   
 	constructor(
 	  private readonly prisma: PrismaService,
@@ -51,6 +84,7 @@ import {
 	  }
 	) {
 	  if (!dto.kind) throw new BadRequestException("User kind is required");
+	  const normalized = this.normalizeRegistration(dto);
   
 	  if (
 		dto.kind === RegisterKind.LOGISTIC_SERVICE_PROVIDER &&
@@ -69,9 +103,39 @@ import {
 		  "role is only allowed when kind is LOGISTIC_SERVICE_PROVIDER"
 		);
 	  }
+
+	  if (!normalized.fullName) {
+		throw new BadRequestException(
+		  normalized.isEnterprise ? "companyName is required" : "name is required"
+		);
+	  }
+
+	  if (!normalized.phoneNumber) {
+		throw new BadRequestException(
+		  normalized.isEnterprise ? "companyPhoneNumber is required" : "phoneNumber is required"
+		);
+	  }
+
+	  if (!normalized.emailAddress) {
+		throw new BadRequestException(
+		  normalized.isEnterprise ? "companyEmailAddress is required" : "emailAddress is required"
+		);
+	  }
+
+	  if (!normalized.businessName) {
+		throw new BadRequestException(
+		  normalized.isEnterprise ? "companyName is required" : "name is required"
+		);
+	  }
+
+	  if (!normalized.businessAddress) {
+		throw new BadRequestException(
+		  normalized.isEnterprise ? "companyAddress is required" : "physicalAddress is required"
+		);
+	  }
   
 	  const existingUser = await this.prisma.user.findUnique({
-		where: { email: dto.emailAddress },
+		where: { email: normalized.emailAddress },
 	  });
   
 	  if (existingUser) {
@@ -101,11 +165,11 @@ import {
 			: this.urlService.verificationUrl(tokenRec.token);
   
 		  const emailContext = {
-			fullName: dto.fullName ?? existingUser.email,
-			businessName: dto.businessName ?? "",
+			fullName: normalized.fullName ?? existingUser.email,
+			businessName: normalized.businessName ?? "",
 			verificationUrl,
 			verificationCode: usesCodeVerification ? tokenRec.token : undefined,
-			phoneNumber: dto.phoneNumber,
+			phoneNumber: normalized.phoneNumber,
 		  };
   
 		  try {
@@ -153,11 +217,13 @@ import {
 		const { company, user } = await this.prisma.$transaction(async (tx) => {
 		  const newCompany = await tx.company.create({
 			data: {
-			  fullName: dto.fullName,
-			  phoneNumber: dto.phoneNumber,
-			  emailAddress: dto.emailAddress,
-			  businessName: dto.businessName,
-			  businessAddress: dto.businessAddress,
+			  fullName: normalized.fullName!,
+			  phoneNumber: normalized.phoneNumber!,
+			  emailAddress: normalized.emailAddress!,
+			  businessName: normalized.businessName!,
+			  businessAddress: normalized.businessAddress!,
+			  country: normalized.country,
+			  language: normalized.language,
 			  role:
 				dto.kind === RegisterKind.LOGISTIC_SERVICE_PROVIDER
 				  ? dto.role
@@ -176,8 +242,8 @@ import {
   
 		  const newUser = await tx.user.create({
 			data: {
-			  email: dto.emailAddress,
-			  phone: dto.phoneNumber,
+			  email: normalized.emailAddress,
+			  phone: normalized.phoneNumber,
 			  kind: dto.kind,
 			  companyId: newCompany.id,
 			  isVerified: false,
@@ -199,11 +265,11 @@ import {
 		  : this.urlService.verificationUrl(tokenRec.token);
   
 		const emailContext = {
-		  fullName: dto.fullName,
-		  businessName: dto.businessName,
+		  fullName: normalized.fullName,
+		  businessName: normalized.businessName,
 		  verificationUrl,
 		  verificationCode: usesCodeVerification ? tokenRec.token : undefined,
-		  phoneNumber: dto.phoneNumber,
+		  phoneNumber: normalized.phoneNumber,
 		};
   
 		try {

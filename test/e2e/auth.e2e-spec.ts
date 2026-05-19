@@ -83,33 +83,46 @@ describe("Auth (e2e) — register / code verify / set-password / login", () => {
 
     for (const [idx, kind] of ["ENTERPRISE", "INDIVIDUAL"].entries()) {
       const email = `e2e-auth-${kind.toLowerCase()}-${timestamp}@example.com`;
-      const payload = {
-        fullName: "E2E Company Owner",
-        phoneNumber: `+234800000000${idx}`,
-        emailAddress: email,
-        businessName: "E2E Company Ltd",
-        businessAddress: "123 Test St",
-        kind,
-      };
+      const payload =
+        kind === "INDIVIDUAL"
+          ? {
+              language: "en",
+              country: "Nigeria",
+              name: "E2E Individual User",
+              emailAddress: email,
+              phoneNumber: `+234800000000${idx}`,
+              physicalAddress: "123 Test St",
+              kind,
+            }
+          : {
+              language: "en",
+              country: "Nigeria",
+              companyName: "E2E Company Ltd",
+              companyEmailAddress: email,
+              companyPhoneNumber: `+234800000000${idx}`,
+              companyAddress: "123 Test St",
+              kind,
+            };
 
       // 1) Register without document uploads
-      const registerRes = await request(app.getHttpServer())
-        .post("/api/auth/register-company")
-        .field("fullName", payload.fullName)
-        .field("phoneNumber", payload.phoneNumber)
-        .field("emailAddress", payload.emailAddress)
-        .field("businessName", payload.businessName)
-        .field("businessAddress", payload.businessAddress)
-        .field("kind", payload.kind)
-        .expect(201);
+      const req = request(app.getHttpServer()).post("/api/auth/register-company");
+      for (const [key, value] of Object.entries(payload)) {
+        req.field(key, value);
+      }
+      const registerRes = await req.expect(201);
 
       expect(registerRes.body).toEqual(
         expect.objectContaining({ ok: true, verificationMethod: "CODE" })
       );
 
       // 2) Find created user + verification token in DB
-      const user = await prisma.user.findUnique({ where: { email } });
+      const user = await prisma.user.findUnique({
+        where: { email },
+        include: { company: true },
+      });
       expect(user).toBeDefined();
+      expect(user!.company?.country).toBe("Nigeria");
+      expect(user!.company?.language).toBe("en");
 
       const vtokenRec = await prisma.verificationToken.findFirst({
         where: { userId: user!.id },

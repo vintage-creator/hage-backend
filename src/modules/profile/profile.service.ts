@@ -21,6 +21,8 @@ export class ProfileService {
 						emailAddress: true,
 						businessName: true,
 						businessAddress: true,
+						country: true,
+						language: true,
 						role: true,
 						createdAt: true,
 					},
@@ -48,6 +50,8 @@ export class ProfileService {
 						emailAddress: user.company.emailAddress,
 						businessName: user.company.businessName,
 						businessAddress: user.company.businessAddress,
+						country: user.company.country,
+						language: user.company.language,
 						role: user.company.role,
 						accountCreated: user.company.createdAt,
 				  }

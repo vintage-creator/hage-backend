@@ -85,11 +85,60 @@ export class AuthController {
     schema: {
       type: "object",
       properties: {
-        fullName: { type: "string" },
-        phoneNumber: { type: "string" },
-        emailAddress: { type: "string" },
-        businessName: { type: "string" },
-        businessAddress: { type: "string" },
+        language: {
+          type: "string",
+          description: "Selected onboarding language",
+          example: "en",
+        },
+        country: {
+          type: "string",
+          description: "Selected country for individual or enterprise onboarding",
+          example: "Nigeria",
+        },
+        fullName: {
+          type: "string",
+          description: "Legacy owner name field. Individual can use name instead.",
+        },
+        name: {
+          type: "string",
+          description: "Individual user name. Alias for fullName.",
+        },
+        phoneNumber: {
+          type: "string",
+          description: "Legacy phone field. Enterprise can use companyPhoneNumber instead.",
+        },
+        companyPhoneNumber: {
+          type: "string",
+          description: "Enterprise company phone number. Alias for phoneNumber.",
+        },
+        emailAddress: {
+          type: "string",
+          description: "Legacy email field. Enterprise can use companyEmailAddress instead.",
+        },
+        companyEmailAddress: {
+          type: "string",
+          description: "Enterprise company email address. Alias for emailAddress.",
+        },
+        businessName: {
+          type: "string",
+          description: "Legacy business name field. Enterprise can use companyName instead.",
+        },
+        companyName: {
+          type: "string",
+          description: "Enterprise company name. Alias for businessName.",
+        },
+        businessAddress: {
+          type: "string",
+          description: "Legacy address field. Use physicalAddress for individual or companyAddress for enterprise.",
+        },
+        physicalAddress: {
+          type: "string",
+          description: "Individual physical address. Alias for businessAddress.",
+        },
+        companyAddress: {
+          type: "string",
+          description: "Enterprise company address. Alias for businessAddress.",
+        },
         kind: {
           type: "string",
           enum: [
@@ -121,11 +170,6 @@ export class AuthController {
         },
       },
       required: [
-        "fullName",
-        "phoneNumber",
-        "emailAddress",
-        "businessName",
-        "businessAddress",
         "kind",
       ],
     },
