@@ -26,6 +26,10 @@ import {
   export class AuthService {
 	private readonly logger = new Logger(AuthService.name);
 	private refreshDays: number;
+
+	private usesCodeVerification(kind?: string | null) {
+	  return kind === RegisterKind.ENTERPRISE || kind === RegisterKind.INDIVIDUAL;
+	}
   
 	constructor(
 	  private readonly prisma: PrismaService,
@@ -88,11 +92,11 @@ import {
 		  }
   
 		  await this.tokenService.deleteVerificationTokensByUser(existingUser.id);
-		  const isEnterprise = existingUser.kind === RegisterKind.ENTERPRISE;
-		  const tokenRec = isEnterprise
+		  const usesCodeVerification = this.usesCodeVerification(existingUser.kind);
+		  const tokenRec = usesCodeVerification
 			? await this.tokenService.createVerificationCode(existingUser.id)
 			: await this.tokenService.createVerificationToken(existingUser.id);
-		  const verificationUrl = isEnterprise
+		  const verificationUrl = usesCodeVerification
 			? undefined
 			: this.urlService.verificationUrl(tokenRec.token);
   
@@ -100,7 +104,7 @@ import {
 			fullName: dto.fullName ?? existingUser.email,
 			businessName: dto.businessName ?? "",
 			verificationUrl,
-			verificationCode: isEnterprise ? tokenRec.token : undefined,
+			verificationCode: usesCodeVerification ? tokenRec.token : undefined,
 			phoneNumber: dto.phoneNumber,
 		  };
   
@@ -122,7 +126,7 @@ import {
   
 		  return {
 			ok: true,
-			message: isEnterprise
+			message: usesCodeVerification
 			  ? "Account exists but not verified — verification code resent."
 			  : "Account exists but not verified — verification email resent.",
 		  };
@@ -186,11 +190,11 @@ import {
 		  };
 		});
   
-		const isEnterprise = dto.kind === RegisterKind.ENTERPRISE;
-		const tokenRec = isEnterprise
+		const usesCodeVerification = this.usesCodeVerification(dto.kind);
+		const tokenRec = usesCodeVerification
 		  ? await this.tokenService.createVerificationCode(user.id)
 		  : await this.tokenService.createVerificationToken(user.id);
-		const verificationUrl = isEnterprise
+		const verificationUrl = usesCodeVerification
 		  ? undefined
 		  : this.urlService.verificationUrl(tokenRec.token);
   
@@ -198,7 +202,7 @@ import {
 		  fullName: dto.fullName,
 		  businessName: dto.businessName,
 		  verificationUrl,
-		  verificationCode: isEnterprise ? tokenRec.token : undefined,
+		  verificationCode: usesCodeVerification ? tokenRec.token : undefined,
 		  phoneNumber: dto.phoneNumber,
 		};
   
@@ -231,7 +235,7 @@ import {
   
 		return {
 		  ok: true,
-		  verificationMethod: isEnterprise ? "CODE" : "EMAIL_LINK",
+		  verificationMethod: usesCodeVerification ? "CODE" : "EMAIL_LINK",
 		};
 	  } catch (err: any) {
 		if (err?.code === "P2002") {
@@ -257,7 +261,7 @@ import {
 	  };
 	}
 
-	async verifyEnterprisePhoneCode(emailAddress: string, verificationCode: string) {
+	async verifyPhoneCode(emailAddress: string, verificationCode: string) {
 	  if (!emailAddress) throw new BadRequestException("Missing emailAddress");
 	  if (!verificationCode) throw new BadRequestException("Missing verificationCode");
 
@@ -271,8 +275,8 @@ import {
 		throw new BadRequestException("Invalid or expired verification code");
 	  }
 
-	  if (rec.user?.kind !== RegisterKind.ENTERPRISE) {
-		throw new BadRequestException("Verification code is only supported for enterprise accounts");
+	  if (!this.usesCodeVerification(rec.user?.kind)) {
+		throw new BadRequestException("Verification code is only supported for enterprise and individual accounts");
 	  }
 
 	  const setupToken = randomBytes(24).toString("hex");

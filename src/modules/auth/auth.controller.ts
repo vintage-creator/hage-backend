@@ -30,7 +30,7 @@ import { CreatePasswordDto } from "./dto/create-password.dto";
 import { LoginDto } from "./dto/login.dto";
 import { ForgotPasswordRequestDto } from "./dto/forgot-password-request.dto";
 import { LogoutDto } from "./dto/logout.dto";
-import { VerifyEnterprisePhoneCodeDto } from "./dto/verify-enterprise-phone-code.dto";
+import { VerifyPhoneCodeDto } from "./dto/verify-enterprise-phone-code.dto";
 
 type FileFilterCallback = (error: Error | null, acceptFile: boolean) => void;
 
@@ -57,12 +57,14 @@ export class AuthController {
 
   @Post("register-company")
   @ApiOperation({
-    summary: "Register user and upload documents (creates unverified user)",
+    summary: "Register user and upload documents when required",
+    description:
+      "ENTERPRISE and INDIVIDUAL users do not upload documents and receive a 4 digit code by email. Other user kinds must upload companyCert and taxCert PDFs and verify by email link.",
   })
   @ApiConsumes("multipart/form-data")
   @ApiResponse({
     status: 201,
-    description: "Registration accepted; verify email or enterprise code",
+    description: "Registration accepted; verify email link or 4 digit code",
   })
   @UseInterceptors(
     FileFieldsInterceptor(
@@ -107,8 +109,16 @@ export class AuthController {
           ],
           description: "Required only when kind is LOGISTIC_SERVICE_PROVIDER",
         },
-        companyCert: { type: "string", format: "binary" },
-        taxCert: { type: "string", format: "binary" },
+        companyCert: {
+          type: "string",
+          format: "binary",
+          description: "Required unless kind is ENTERPRISE or INDIVIDUAL",
+        },
+        taxCert: {
+          type: "string",
+          format: "binary",
+          description: "Required unless kind is ENTERPRISE or INDIVIDUAL",
+        },
       },
       required: [
         "fullName",
@@ -132,6 +142,7 @@ export class AuthController {
 
     if (
       dto.kind !== RegisterKind.ENTERPRISE &&
+      dto.kind !== RegisterKind.INDIVIDUAL &&
       (!files || !files.companyCert?.[0] || !files.taxCert?.[0])
     ) {
       throw new BadRequestException(
@@ -145,20 +156,35 @@ export class AuthController {
     });
   }
 
-  @Post("verify-enterprise-phone-code")
+  @Post("verify-phone-code")
   @ApiOperation({
-    summary: "Verify enterprise onboarding phone code sent by email",
+    summary: "Verify enterprise or individual onboarding code",
   })
   @ApiResponse({
     status: 200,
     description: "Code verified — use returned verificationToken to set password",
   })
   @HttpCode(HttpStatus.OK)
-  async verifyEnterprisePhoneCode(@Body() dto: VerifyEnterprisePhoneCodeDto) {
-    return this.auth.verifyEnterprisePhoneCode(
+  async verifyPhoneCode(@Body() dto: VerifyPhoneCodeDto) {
+    return this.auth.verifyPhoneCode(
       dto.emailAddress,
       dto.verificationCode
     );
+  }
+
+  @Post("verify-enterprise-phone-code")
+  @ApiOperation({
+    summary: "Verify enterprise or individual onboarding code",
+    description:
+      "Compatibility alias for verify-phone-code. Use verify-phone-code for new integrations.",
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Code verified — use returned verificationToken to set password",
+  })
+  @HttpCode(HttpStatus.OK)
+  async verifyEnterprisePhoneCode(@Body() dto: VerifyPhoneCodeDto) {
+    return this.verifyPhoneCode(dto);
   }
 
   @Post("set-password")

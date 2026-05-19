@@ -78,80 +78,84 @@ describe("Auth (e2e) — register / code verify / set-password / login", () => {
     }
   });
 
-  it("full enterprise flow: register-company -> verify code -> set-password -> login", async () => {
-    const email = `e2e-auth-${Date.now()}@example.com`;
-    const payload = {
-      fullName: "E2E Company Owner",
-      phoneNumber: "+2348000000000",
-      emailAddress: email,
-      businessName: "E2E Company Ltd",
-      businessAddress: "123 Test St",
-      kind: "ENTERPRISE",
-    };
+  it("full code flow: enterprise and individual register without documents", async () => {
+    const timestamp = Date.now();
 
-    // 1) Register enterprise company (no document upload required)
-    const registerRes = await request(app.getHttpServer())
-      .post("/api/auth/register-company")
-      .field("fullName", payload.fullName)
-      .field("phoneNumber", payload.phoneNumber)
-      .field("emailAddress", payload.emailAddress)
-      .field("businessName", payload.businessName)
-      .field("businessAddress", payload.businessAddress)
-      .field("kind", payload.kind)
-      .expect(201);
+    for (const [idx, kind] of ["ENTERPRISE", "INDIVIDUAL"].entries()) {
+      const email = `e2e-auth-${kind.toLowerCase()}-${timestamp}@example.com`;
+      const payload = {
+        fullName: "E2E Company Owner",
+        phoneNumber: `+234800000000${idx}`,
+        emailAddress: email,
+        businessName: "E2E Company Ltd",
+        businessAddress: "123 Test St",
+        kind,
+      };
 
-    expect(registerRes.body).toEqual(
-      expect.objectContaining({ ok: true, verificationMethod: "CODE" })
-    );
+      // 1) Register without document uploads
+      const registerRes = await request(app.getHttpServer())
+        .post("/api/auth/register-company")
+        .field("fullName", payload.fullName)
+        .field("phoneNumber", payload.phoneNumber)
+        .field("emailAddress", payload.emailAddress)
+        .field("businessName", payload.businessName)
+        .field("businessAddress", payload.businessAddress)
+        .field("kind", payload.kind)
+        .expect(201);
 
-    // 2) Find created user + verification token in DB
-    const user = await prisma.user.findUnique({ where: { email } });
-    expect(user).toBeDefined();
+      expect(registerRes.body).toEqual(
+        expect.objectContaining({ ok: true, verificationMethod: "CODE" })
+      );
 
-    const vtokenRec = await prisma.verificationToken.findFirst({
-      where: { userId: user!.id },
-      orderBy: { createdAt: "desc" },
-    });
-    expect(vtokenRec).toBeDefined();
-    const code = vtokenRec!.token;
-    expect(code).toMatch(/^\d{4}$/);
+      // 2) Find created user + verification token in DB
+      const user = await prisma.user.findUnique({ where: { email } });
+      expect(user).toBeDefined();
 
-    // 3) Verify enterprise code
-    const codeVerifyRes = await request(app.getHttpServer())
-      .post("/api/auth/verify-enterprise-phone-code")
-      .send({ emailAddress: email, verificationCode: code })
-      .expect(200);
+      const vtokenRec = await prisma.verificationToken.findFirst({
+        where: { userId: user!.id },
+        orderBy: { createdAt: "desc" },
+      });
+      expect(vtokenRec).toBeDefined();
+      const code = vtokenRec!.token;
+      expect(code).toMatch(/^\d{4}$/);
 
-    expect(codeVerifyRes.body).toEqual(
-      expect.objectContaining({
-        ok: true,
-        email,
-      })
-    );
-    expect(codeVerifyRes.body.verificationToken).toMatch(/^[a-f0-9]{48}$/);
+      // 3) Verify code
+      const codeVerifyRes = await request(app.getHttpServer())
+        .post("/api/auth/verify-phone-code")
+        .send({ emailAddress: email, verificationCode: code })
+        .expect(200);
 
-    // 4) Set password
-    const newPassword = "Str0ngP@ssword!";
-    const setPassRes = await request(app.getHttpServer())
-      .post("/api/auth/set-password")
-      .send({
-        verificationToken: codeVerifyRes.body.verificationToken,
-        password: newPassword,
-        retypePassword: newPassword,
-      })
-      .expect(201);
+      expect(codeVerifyRes.body).toEqual(
+        expect.objectContaining({
+          ok: true,
+          email,
+        })
+      );
+      expect(codeVerifyRes.body.verificationToken).toMatch(/^[a-f0-9]{48}$/);
 
-    expect(setPassRes.body).toEqual(expect.objectContaining({ ok: true }));
+      // 4) Set password
+      const newPassword = "Str0ngP@ssword!";
+      const setPassRes = await request(app.getHttpServer())
+        .post("/api/auth/set-password")
+        .send({
+          verificationToken: codeVerifyRes.body.verificationToken,
+          password: newPassword,
+          retypePassword: newPassword,
+        })
+        .expect(201);
 
-    // 5) Login using email
-    const loginRes = await request(app.getHttpServer())
-      .post("/api/auth/login")
-      .send({ identifier: email, password: newPassword })
-      .expect(200);
+      expect(setPassRes.body).toEqual(expect.objectContaining({ ok: true }));
 
-    expect(loginRes.body).toHaveProperty("accessToken");
-    expect(loginRes.body).toHaveProperty("refreshToken");
-    expect(loginRes.body).toHaveProperty("user");
-    expect(loginRes.body.user.email).toBe(email);
+      // 5) Login using email
+      const loginRes = await request(app.getHttpServer())
+        .post("/api/auth/login")
+        .send({ identifier: email, password: newPassword })
+        .expect(200);
+
+      expect(loginRes.body).toHaveProperty("accessToken");
+      expect(loginRes.body).toHaveProperty("refreshToken");
+      expect(loginRes.body).toHaveProperty("user");
+      expect(loginRes.body.user.email).toBe(email);
+    }
   }, 60000);
 });
