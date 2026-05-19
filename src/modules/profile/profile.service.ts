@@ -64,6 +64,7 @@ export class ProfileService {
 				company: {
 					select: {
 						businessName: true,
+						fullName: true,
 					},
 				},
 			},
@@ -96,7 +97,7 @@ export class ProfileService {
 		]);
 
 		return {
-			businessName: user.company?.businessName ?? user.company.fullName,
+			businessName: user.company?.businessName ?? user.company?.fullName ?? null,
 			kind: user.kind,
 			dashboard: {
 				delivered,
