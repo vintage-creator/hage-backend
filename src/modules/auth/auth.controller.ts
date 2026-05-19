@@ -59,12 +59,13 @@ export class AuthController {
   @ApiOperation({
     summary: "Register user and upload documents when required",
     description:
-      "ENTERPRISE and INDIVIDUAL users do not upload documents and receive a 4 digit code by email. Other user kinds must upload companyCert and taxCert PDFs and verify by email link.",
+      "INDIVIDUAL and ENTERPRISE users do not upload documents and receive a 4 digit code by email. LOGISTIC_SERVICE_PROVIDER, DISTRIBUTOR, and LAST_MILE_DELIVERY users must upload companyCert and taxCert PDFs and verify by email link.",
   })
   @ApiConsumes("multipart/form-data")
   @ApiResponse({
     status: 201,
-    description: "Registration accepted; verify email link or 4 digit code",
+    description:
+      "Registration accepted. INDIVIDUAL/ENTERPRISE return verificationMethod=CODE; document-required users return verificationMethod=EMAIL_LINK.",
   })
   @UseInterceptors(
     FileFieldsInterceptor(
@@ -83,94 +84,102 @@ export class AuthController {
   )
   @ApiBody({
     schema: {
-      type: "object",
-      properties: {
-        language: {
-          type: "string",
-          description: "Selected onboarding language",
-          example: "en",
-        },
-        country: {
-          type: "string",
-          description: "Selected country for individual or enterprise onboarding",
-          example: "Nigeria",
-        },
-        fullName: {
-          type: "string",
-          description: "Legacy owner name field. Individual can use name instead.",
-        },
-        name: {
-          type: "string",
-          description: "Individual user name. Alias for fullName.",
-        },
-        phoneNumber: {
-          type: "string",
-          description: "Legacy phone field. Enterprise can use companyPhoneNumber instead.",
-        },
-        companyPhoneNumber: {
-          type: "string",
-          description: "Enterprise company phone number. Alias for phoneNumber.",
-        },
-        emailAddress: {
-          type: "string",
-          description: "Legacy email field. Enterprise can use companyEmailAddress instead.",
-        },
-        companyEmailAddress: {
-          type: "string",
-          description: "Enterprise company email address. Alias for emailAddress.",
-        },
-        businessName: {
-          type: "string",
-          description: "Legacy business name field. Enterprise can use companyName instead.",
-        },
-        companyName: {
-          type: "string",
-          description: "Enterprise company name. Alias for businessName.",
-        },
-        businessAddress: {
-          type: "string",
-          description: "Legacy address field. Use physicalAddress for individual or companyAddress for enterprise.",
-        },
-        physicalAddress: {
-          type: "string",
-          description: "Individual physical address. Alias for businessAddress.",
-        },
-        companyAddress: {
-          type: "string",
-          description: "Enterprise company address. Alias for businessAddress.",
-        },
-        kind: {
-          type: "string",
-          enum: [
-            "ENTERPRISE",
-            "DISTRIBUTOR",
-            "INDIVIDUAL",
-            "LOGISTIC_SERVICE_PROVIDER",
-            "LAST_MILE_DELIVERY",
+      oneOf: [
+        {
+          title: "Individual user - no documents, 4 digit code",
+          type: "object",
+          required: [
+            "kind",
+            "name",
+            "emailAddress",
+            "phoneNumber",
+            "physicalAddress",
+            "country",
+            "language",
           ],
+          properties: {
+            kind: { type: "string", enum: ["INDIVIDUAL"] },
+            language: { type: "string", example: "en" },
+            name: { type: "string", example: "Jane Doe" },
+            emailAddress: { type: "string", example: "jane@example.com" },
+            phoneNumber: { type: "string", example: "+2348010000000" },
+            physicalAddress: { type: "string", example: "12 Port Road" },
+            country: { type: "string", example: "Nigeria" },
+          },
         },
-        role: {
-          type: "string",
-          enum: [
-            "CROSS_BORDER_LOGISTICS",
-            "TRANSPORTER",
-            "LAST_MILE_PROVIDER",
+        {
+          title: "Enterprise user - no documents, 4 digit code",
+          type: "object",
+          required: [
+            "kind",
+            "companyName",
+            "companyEmailAddress",
+            "companyPhoneNumber",
+            "companyAddress",
+            "country",
+            "language",
           ],
-          description: "Required only when kind is LOGISTIC_SERVICE_PROVIDER",
+          properties: {
+            kind: { type: "string", enum: ["ENTERPRISE"] },
+            language: { type: "string", example: "en" },
+            companyName: { type: "string", example: "ACME Ltd" },
+            companyEmailAddress: {
+              type: "string",
+              example: "ops@acme.example",
+            },
+            companyPhoneNumber: { type: "string", example: "+2348010000000" },
+            companyAddress: { type: "string", example: "12 Port Road" },
+            country: { type: "string", example: "Nigeria" },
+          },
         },
-        companyCert: {
-          type: "string",
-          format: "binary",
-          description: "Required unless kind is ENTERPRISE or INDIVIDUAL",
+        {
+          title: "Document-required user - email link verification",
+          type: "object",
+          required: [
+            "kind",
+            "fullName",
+            "phoneNumber",
+            "emailAddress",
+            "businessName",
+            "businessAddress",
+            "companyCert",
+            "taxCert",
+          ],
+          properties: {
+            kind: {
+              type: "string",
+              enum: [
+                "DISTRIBUTOR",
+                "LOGISTIC_SERVICE_PROVIDER",
+                "LAST_MILE_DELIVERY",
+              ],
+            },
+            fullName: { type: "string", example: "John Doe" },
+            phoneNumber: { type: "string", example: "+2348010000000" },
+            emailAddress: { type: "string", example: "ops@example.com" },
+            businessName: { type: "string", example: "ACME Logistics Ltd" },
+            businessAddress: { type: "string", example: "12 Port Road" },
+            role: {
+              type: "string",
+              enum: [
+                "CROSS_BORDER_LOGISTICS",
+                "TRANSPORTER",
+                "LAST_MILE_PROVIDER",
+              ],
+              description: "Required only when kind is LOGISTIC_SERVICE_PROVIDER",
+            },
+            companyCert: {
+              type: "string",
+              format: "binary",
+              description: "Required PDF upload",
+            },
+            taxCert: {
+              type: "string",
+              format: "binary",
+              description: "Required PDF upload",
+            },
+          },
         },
-        taxCert: {
-          type: "string",
-          format: "binary",
-          description: "Required unless kind is ENTERPRISE or INDIVIDUAL",
-        },
-      },
-      required: [
-        "kind",
       ],
     },
   })
