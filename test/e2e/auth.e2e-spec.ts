@@ -102,10 +102,14 @@ describe("Auth (e2e) — register / code verify / set-password / login", () => {
               companyPhoneNumber: `+234800000000${idx}`,
               companyAddress: "123 Test St",
               kind,
-            };
+      };
+      const registerPath =
+        kind === "INDIVIDUAL"
+          ? "/api/auth/register-individual"
+          : "/api/auth/register-enterprise";
 
       // 1) Register without document uploads
-      const req = request(app.getHttpServer()).post("/api/auth/register-company");
+      const req = request(app.getHttpServer()).post(registerPath);
       for (const [key, value] of Object.entries(payload)) {
         req.field(key, value);
       }

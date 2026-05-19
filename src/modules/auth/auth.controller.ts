@@ -30,7 +30,7 @@ import { CreatePasswordDto } from "./dto/create-password.dto";
 import { LoginDto } from "./dto/login.dto";
 import { ForgotPasswordRequestDto } from "./dto/forgot-password-request.dto";
 import { LogoutDto } from "./dto/logout.dto";
-import { VerifyPhoneCodeDto } from "./dto/verify-enterprise-phone-code.dto";
+import { VerifyPhoneCodeDto } from "./dto/verify-phone-code.dto";
 
 type FileFilterCallback = (error: Error | null, acceptFile: boolean) => void;
 
@@ -50,22 +50,141 @@ const pdfFileFilter = (
   }
 };
 
+const individualRegistrationSchema = {
+  type: "object",
+  required: [
+    "kind",
+    "language",
+    "name",
+    "emailAddress",
+    "phoneNumber",
+    "physicalAddress",
+    "country",
+  ],
+  properties: {
+    kind: { type: "string", enum: ["INDIVIDUAL"], example: "INDIVIDUAL" },
+    language: { type: "string", example: "en" },
+    name: { type: "string", example: "Jane Doe" },
+    emailAddress: { type: "string", example: "jane@example.com" },
+    phoneNumber: { type: "string", example: "+2348010000000" },
+    physicalAddress: { type: "string", example: "12 Port Road" },
+    country: { type: "string", example: "Nigeria" },
+  },
+};
+
+const enterpriseRegistrationSchema = {
+  type: "object",
+  required: [
+    "kind",
+    "language",
+    "companyName",
+    "companyEmailAddress",
+    "companyPhoneNumber",
+    "companyAddress",
+    "country",
+  ],
+  properties: {
+    kind: { type: "string", enum: ["ENTERPRISE"], example: "ENTERPRISE" },
+    language: { type: "string", example: "en" },
+    companyName: { type: "string", example: "ACME Ltd" },
+    companyEmailAddress: { type: "string", example: "ops@acme.example" },
+    companyPhoneNumber: { type: "string", example: "+2348010000000" },
+    companyAddress: { type: "string", example: "12 Port Road" },
+    country: { type: "string", example: "Nigeria" },
+  },
+};
+
+const documentRegistrationSchema = {
+  type: "object",
+  required: [
+    "kind",
+    "fullName",
+    "phoneNumber",
+    "emailAddress",
+    "businessName",
+    "businessAddress",
+    "companyCert",
+    "taxCert",
+  ],
+  properties: {
+    kind: {
+      type: "string",
+      enum: ["DISTRIBUTOR", "LOGISTIC_SERVICE_PROVIDER", "LAST_MILE_DELIVERY"],
+      example: "LOGISTIC_SERVICE_PROVIDER",
+    },
+    fullName: { type: "string", example: "John Doe" },
+    phoneNumber: { type: "string", example: "+2348010000000" },
+    emailAddress: { type: "string", example: "ops@example.com" },
+    businessName: { type: "string", example: "ACME Logistics Ltd" },
+    businessAddress: { type: "string", example: "12 Port Road" },
+    role: {
+      type: "string",
+      enum: ["CROSS_BORDER_LOGISTICS", "TRANSPORTER", "LAST_MILE_PROVIDER"],
+      description: "Required only when kind is LOGISTIC_SERVICE_PROVIDER",
+      example: "TRANSPORTER",
+    },
+    companyCert: {
+      type: "string",
+      format: "binary",
+      description: "Required PDF upload",
+    },
+    taxCert: {
+      type: "string",
+      format: "binary",
+      description: "Required PDF upload",
+    },
+  },
+};
+
 @ApiTags("auth")
 @Controller("auth")
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
+  @Post("register-individual")
+  @ApiOperation({
+    summary: "Register individual user",
+    description:
+      "No document upload is required. The user receives a 4 digit verification code by email.",
+  })
+  @ApiConsumes("multipart/form-data")
+  @ApiBody({ schema: individualRegistrationSchema })
+  @ApiResponse({
+    status: 201,
+    description: "Registration accepted; verify with the 4 digit code.",
+  })
+  @UseInterceptors(FileFieldsInterceptor([], { storage: memoryStorage() }))
+  async registerIndividual(@Body() dto: RegisterCompanyDto) {
+    return this.auth.registerCompany(dto, {});
+  }
+
+  @Post("register-enterprise")
+  @ApiOperation({
+    summary: "Register enterprise user",
+    description:
+      "No document upload is required. The company email receives a 4 digit verification code.",
+  })
+  @ApiConsumes("multipart/form-data")
+  @ApiBody({ schema: enterpriseRegistrationSchema })
+  @ApiResponse({
+    status: 201,
+    description: "Registration accepted; verify with the 4 digit code.",
+  })
+  @UseInterceptors(FileFieldsInterceptor([], { storage: memoryStorage() }))
+  async registerEnterprise(@Body() dto: RegisterCompanyDto) {
+    return this.auth.registerCompany(dto, {});
+  }
+
   @Post("register-company")
   @ApiOperation({
-    summary: "Register user and upload documents when required",
+    summary: "Register document-required user",
     description:
-      "INDIVIDUAL and ENTERPRISE users do not upload documents and receive a 4 digit code by email. LOGISTIC_SERVICE_PROVIDER, DISTRIBUTOR, and LAST_MILE_DELIVERY users must upload companyCert and taxCert PDFs and verify by email link.",
+      "Use this for LOGISTIC_SERVICE_PROVIDER, DISTRIBUTOR, and LAST_MILE_DELIVERY users. These users upload companyCert and taxCert PDFs and verify by email link. Individual and enterprise users should use register-individual or register-enterprise.",
   })
   @ApiConsumes("multipart/form-data")
   @ApiResponse({
     status: 201,
-    description:
-      "Registration accepted. INDIVIDUAL/ENTERPRISE return verificationMethod=CODE; document-required users return verificationMethod=EMAIL_LINK.",
+    description: "Registration accepted; verify with the email link.",
   })
   @UseInterceptors(
     FileFieldsInterceptor(
@@ -83,105 +202,7 @@ export class AuthController {
     )
   )
   @ApiBody({
-    schema: {
-      oneOf: [
-        {
-          title: "Individual user - no documents, 4 digit code",
-          type: "object",
-          required: [
-            "kind",
-            "name",
-            "emailAddress",
-            "phoneNumber",
-            "physicalAddress",
-            "country",
-            "language",
-          ],
-          properties: {
-            kind: { type: "string", enum: ["INDIVIDUAL"] },
-            language: { type: "string", example: "en" },
-            name: { type: "string", example: "Jane Doe" },
-            emailAddress: { type: "string", example: "jane@example.com" },
-            phoneNumber: { type: "string", example: "+2348010000000" },
-            physicalAddress: { type: "string", example: "12 Port Road" },
-            country: { type: "string", example: "Nigeria" },
-          },
-        },
-        {
-          title: "Enterprise user - no documents, 4 digit code",
-          type: "object",
-          required: [
-            "kind",
-            "companyName",
-            "companyEmailAddress",
-            "companyPhoneNumber",
-            "companyAddress",
-            "country",
-            "language",
-          ],
-          properties: {
-            kind: { type: "string", enum: ["ENTERPRISE"] },
-            language: { type: "string", example: "en" },
-            companyName: { type: "string", example: "ACME Ltd" },
-            companyEmailAddress: {
-              type: "string",
-              example: "ops@acme.example",
-            },
-            companyPhoneNumber: { type: "string", example: "+2348010000000" },
-            companyAddress: { type: "string", example: "12 Port Road" },
-            country: { type: "string", example: "Nigeria" },
-          },
-        },
-        {
-          title: "Document-required user - email link verification",
-          type: "object",
-          required: [
-            "kind",
-            "fullName",
-            "phoneNumber",
-            "emailAddress",
-            "businessName",
-            "businessAddress",
-            "companyCert",
-            "taxCert",
-          ],
-          properties: {
-            kind: {
-              type: "string",
-              enum: [
-                "DISTRIBUTOR",
-                "LOGISTIC_SERVICE_PROVIDER",
-                "LAST_MILE_DELIVERY",
-              ],
-            },
-            fullName: { type: "string", example: "John Doe" },
-            phoneNumber: { type: "string", example: "+2348010000000" },
-            emailAddress: { type: "string", example: "ops@example.com" },
-            businessName: { type: "string", example: "ACME Logistics Ltd" },
-            businessAddress: { type: "string", example: "12 Port Road" },
-            role: {
-              type: "string",
-              enum: [
-                "CROSS_BORDER_LOGISTICS",
-                "TRANSPORTER",
-                "LAST_MILE_PROVIDER",
-              ],
-              description: "Required only when kind is LOGISTIC_SERVICE_PROVIDER",
-            },
-            companyCert: {
-              type: "string",
-              format: "binary",
-              description: "Required PDF upload",
-            },
-            taxCert: {
-              type: "string",
-              format: "binary",
-              description: "Required PDF upload",
-            },
-          },
-        },
-      ],
-    },
+    schema: documentRegistrationSchema,
   })
   async registerCompany(
     @Body() dto: RegisterCompanyDto,
@@ -223,21 +244,6 @@ export class AuthController {
       dto.emailAddress,
       dto.verificationCode
     );
-  }
-
-  @Post("verify-enterprise-phone-code")
-  @ApiOperation({
-    summary: "Verify enterprise or individual onboarding code",
-    description:
-      "Compatibility alias for verify-phone-code. Use verify-phone-code for new integrations.",
-  })
-  @ApiResponse({
-    status: 200,
-    description: "Code verified — use returned verificationToken to set password",
-  })
-  @HttpCode(HttpStatus.OK)
-  async verifyEnterprisePhoneCode(@Body() dto: VerifyPhoneCodeDto) {
-    return this.verifyPhoneCode(dto);
   }
 
   @Post("set-password")
