@@ -12,7 +12,7 @@ import { LoginDto } from "./dto/login.dto";
 import { RefreshTokenDto } from "./dto/refresh-token.dto";
 import { ForgotPasswordRequestDto } from "./dto/forgot-password-request.dto";
 import { LogoutDto } from "./dto/logout.dto";
-import { VerifyEnterprisePhoneCodeDto } from "./dto/verify-enterprise-phone-code.dto";
+import { VerifyPhoneCodeDto } from "./dto/verify-phone-code.dto";
 
 type FileFilterCallback = (error: Error | null, acceptFile: boolean) => void;
 
@@ -28,19 +28,113 @@ const pdfFileFilter = (_req: Request, file: Express.Multer.File, cb: FileFilterC
 	}
 };
 
+const individualRegistrationSchema = {
+	type: "object",
+	required: ["kind", "language", "name", "emailAddress", "phoneNumber", "physicalAddress", "country"],
+	properties: {
+		kind: { type: "string", enum: ["INDIVIDUAL"], example: "INDIVIDUAL" },
+		language: { type: "string", example: "en" },
+		name: { type: "string", example: "Jane Doe" },
+		emailAddress: { type: "string", example: "jane@example.com" },
+		phoneNumber: { type: "string", example: "+2348010000000" },
+		physicalAddress: { type: "string", example: "12 Port Road" },
+		country: { type: "string", example: "Nigeria" },
+	},
+};
+
+const enterpriseRegistrationSchema = {
+	type: "object",
+	required: ["kind", "language", "companyName", "companyEmailAddress", "companyPhoneNumber", "companyAddress", "country"],
+	properties: {
+		kind: { type: "string", enum: ["ENTERPRISE"], example: "ENTERPRISE" },
+		language: { type: "string", example: "en" },
+		companyName: { type: "string", example: "ACME Ltd" },
+		companyEmailAddress: { type: "string", example: "ops@acme.example" },
+		companyPhoneNumber: { type: "string", example: "+2348010000000" },
+		companyAddress: { type: "string", example: "12 Port Road" },
+		country: { type: "string", example: "Nigeria" },
+	},
+};
+
+const documentRegistrationSchema = {
+	type: "object",
+	required: ["kind", "fullName", "phoneNumber", "emailAddress", "businessName", "businessAddress", "companyCert", "taxCert"],
+	properties: {
+		kind: {
+			type: "string",
+			enum: ["DISTRIBUTOR", "LOGISTIC_SERVICE_PROVIDER", "LAST_MILE_DELIVERY"],
+			example: "LOGISTIC_SERVICE_PROVIDER",
+		},
+		fullName: { type: "string", example: "John Doe" },
+		phoneNumber: { type: "string", example: "+2348010000000" },
+		emailAddress: { type: "string", example: "ops@example.com" },
+		businessName: { type: "string", example: "ACME Logistics Ltd" },
+		businessAddress: { type: "string", example: "12 Port Road" },
+		role: {
+			type: "string",
+			enum: ["CROSS_BORDER_LOGISTICS", "TRANSPORTER", "LAST_MILE_PROVIDER"],
+			description: "Required only when kind is LOGISTIC_SERVICE_PROVIDER",
+			example: "TRANSPORTER",
+		},
+		companyCert: {
+			type: "string",
+			format: "binary",
+			description: "Required PDF upload",
+		},
+		taxCert: {
+			type: "string",
+			format: "binary",
+			description: "Required PDF upload",
+		},
+	},
+};
+
 @ApiTags("auth")
 @Controller("auth")
 export class AuthController {
 	constructor(private readonly auth: AuthService) {}
 
+	@Post("register-individual")
+	@ApiOperation({
+		summary: "Register individual user",
+		description: "No document upload is required. The user receives a 4 digit verification code by email.",
+	})
+	@ApiConsumes("multipart/form-data")
+	@ApiBody({ schema: individualRegistrationSchema })
+	@ApiResponse({
+		status: 201,
+		description: "Registration accepted; verify with the 4 digit code.",
+	})
+	@UseInterceptors(FileFieldsInterceptor([], { storage: memoryStorage() }))
+	async registerIndividual(@Body() dto: RegisterCompanyDto) {
+		return this.auth.registerCompany(dto, {});
+	}
+
+	@Post("register-enterprise")
+	@ApiOperation({
+		summary: "Register enterprise user",
+		description: "No document upload is required. The company email receives a 4 digit verification code.",
+	})
+	@ApiConsumes("multipart/form-data")
+	@ApiBody({ schema: enterpriseRegistrationSchema })
+	@ApiResponse({
+		status: 201,
+		description: "Registration accepted; verify with the 4 digit code.",
+	})
+	@UseInterceptors(FileFieldsInterceptor([], { storage: memoryStorage() }))
+	async registerEnterprise(@Body() dto: RegisterCompanyDto) {
+		return this.auth.registerCompany(dto, {});
+	}
+
 	@Post("register-company")
 	@ApiOperation({
-		summary: "Register user and upload documents (creates unverified user)",
+		summary: "Register document-required user",
+		description: "Use this for LOGISTIC_SERVICE_PROVIDER, DISTRIBUTOR, and LAST_MILE_DELIVERY users. These users upload companyCert and taxCert PDFs and verify by email link. Individual and enterprise users should use register-individual or register-enterprise.",
 	})
 	@ApiConsumes("multipart/form-data")
 	@ApiResponse({
 		status: 201,
-		description: "Registration accepted; verify email or enterprise code",
+		description: "Registration accepted; verify with the email link.",
 	})
 	@UseInterceptors(
 		FileFieldsInterceptor(
@@ -58,28 +152,7 @@ export class AuthController {
 		)
 	)
 	@ApiBody({
-		schema: {
-			type: "object",
-			properties: {
-				fullName: { type: "string" },
-				phoneNumber: { type: "string" },
-				emailAddress: { type: "string" },
-				businessName: { type: "string" },
-				businessAddress: { type: "string" },
-				kind: {
-					type: "string",
-					enum: ["ENTERPRISE", "DISTRIBUTOR", "INDIVIDUAL", "LOGISTIC_SERVICE_PROVIDER", "LAST_MILE_DELIVERY"],
-				},
-				role: {
-					type: "string",
-					enum: ["CROSS_BORDER_LOGISTICS", "TRANSPORTER", "LAST_MILE_PROVIDER"],
-					description: "Required only when kind is LOGISTIC_SERVICE_PROVIDER",
-				},
-				companyCert: { type: "string", format: "binary" },
-				taxCert: { type: "string", format: "binary" },
-			},
-			required: ["fullName", "phoneNumber", "emailAddress", "businessName", "businessAddress", "kind"],
-		},
+		schema: documentRegistrationSchema,
 	})
 	async registerCompany(
 		@Body() dto: RegisterCompanyDto,
@@ -91,7 +164,7 @@ export class AuthController {
 	) {
 		if (!dto.kind) throw new BadRequestException("User kind is required");
 
-		if (dto.kind !== RegisterKind.ENTERPRISE && (!files || !files.companyCert?.[0] || !files.taxCert?.[0])) {
+		if (dto.kind !== RegisterKind.ENTERPRISE && dto.kind !== RegisterKind.INDIVIDUAL && (!files || !files.companyCert?.[0] || !files.taxCert?.[0])) {
 			throw new BadRequestException("companyCert and taxCert files are required (fields: companyCert, taxCert)");
 		}
 
@@ -101,17 +174,17 @@ export class AuthController {
 		});
 	}
 
-	@Post("verify-enterprise-phone-code")
+	@Post("verify-phone-code")
 	@ApiOperation({
-		summary: "Verify enterprise onboarding phone code sent by email",
+		summary: "Verify enterprise or individual onboarding code",
 	})
 	@ApiResponse({
 		status: 200,
 		description: "Code verified — use returned verificationToken to set password",
 	})
 	@HttpCode(HttpStatus.OK)
-	async verifyEnterprisePhoneCode(@Body() dto: VerifyEnterprisePhoneCodeDto) {
-		return this.auth.verifyEnterprisePhoneCode(dto.emailAddress, dto.verificationCode);
+	async verifyPhoneCode(@Body() dto: VerifyPhoneCodeDto) {
+		return this.auth.verifyPhoneCode(dto.emailAddress, dto.verificationCode);
 	}
 
 	@Post("set-password")

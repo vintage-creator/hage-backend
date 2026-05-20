@@ -1,7 +1,7 @@
 import { ApiProperty } from "@nestjs/swagger";
 import { IsEmail, IsNotEmpty, IsString, Matches } from "class-validator";
 
-export class VerifyEnterprisePhoneCodeDto {
+export class VerifyPhoneCodeDto {
   @ApiProperty({ example: "me@example.com" })
   @IsEmail()
   emailAddress!: string;

@@ -18,6 +18,34 @@ export class AuthService {
 	private readonly logger = new Logger(AuthService.name);
 	private refreshDays: number;
 
+	private usesCodeVerification(kind?: string | null) {
+		return kind === RegisterKind.ENTERPRISE || kind === RegisterKind.INDIVIDUAL;
+	}
+
+	private normalizeRegistration(dto: RegisterCompanyDto) {
+		const isIndividual = dto.kind === RegisterKind.INDIVIDUAL;
+		const isEnterprise = dto.kind === RegisterKind.ENTERPRISE;
+		const fullName = (dto.fullName ?? dto.name ?? dto.companyName ?? dto.businessName)?.trim();
+		const phoneNumber = (dto.phoneNumber ?? dto.companyPhoneNumber)?.trim();
+		const emailAddress = (dto.emailAddress ?? dto.companyEmailAddress)?.trim().toLowerCase();
+		const businessName = (dto.businessName ?? dto.companyName ?? (isIndividual ? dto.name : undefined) ?? fullName)?.trim();
+		const businessAddress = (dto.businessAddress ?? dto.physicalAddress ?? dto.companyAddress)?.trim();
+		const country = dto.country?.trim();
+		const language = dto.language?.trim();
+
+		return {
+			isIndividual,
+			isEnterprise,
+			fullName,
+			phoneNumber,
+			emailAddress,
+			businessName,
+			businessAddress,
+			country,
+			language,
+		};
+	}
+
 	constructor(private readonly prisma: PrismaService, private readonly jwt: JwtService, private readonly cfg: ConfigService, @Inject("StorageService") private readonly storage: StorageService, private readonly mailer: MailService, private readonly tokenService: TokenService, private readonly urlService: UrlService) {
 		this.refreshDays = Number(this.cfg.get("REFRESH_EXPIRES_DAYS") ?? 30);
 	}
@@ -30,6 +58,7 @@ export class AuthService {
 		}
 	) {
 		if (!dto.kind) throw new BadRequestException("User kind is required");
+		const normalized = this.normalizeRegistration(dto);
 
 		if (dto.kind === RegisterKind.LOGISTIC_SERVICE_PROVIDER && !dto.role) {
 			throw new BadRequestException("role is required when kind is LOGISTIC_SERVICE_PROVIDER");
@@ -39,8 +68,28 @@ export class AuthService {
 			throw new BadRequestException("role is only allowed when kind is LOGISTIC_SERVICE_PROVIDER");
 		}
 
+		if (!normalized.fullName) {
+			throw new BadRequestException(normalized.isEnterprise ? "companyName is required" : "name is required");
+		}
+
+		if (!normalized.phoneNumber) {
+			throw new BadRequestException(normalized.isEnterprise ? "companyPhoneNumber is required" : "phoneNumber is required");
+		}
+
+		if (!normalized.emailAddress) {
+			throw new BadRequestException(normalized.isEnterprise ? "companyEmailAddress is required" : "emailAddress is required");
+		}
+
+		if (!normalized.businessName) {
+			throw new BadRequestException(normalized.isEnterprise ? "companyName is required" : "name is required");
+		}
+
+		if (!normalized.businessAddress) {
+			throw new BadRequestException(normalized.isEnterprise ? "companyAddress is required" : "physicalAddress is required");
+		}
+
 		const existingUser = await this.prisma.user.findUnique({
-			where: { email: dto.emailAddress },
+			where: { email: normalized.emailAddress },
 		});
 
 		if (existingUser) {
@@ -59,16 +108,16 @@ export class AuthService {
 				}
 
 				await this.tokenService.deleteVerificationTokensByUser(existingUser.id);
-				const isEnterprise = existingUser.kind === RegisterKind.ENTERPRISE;
-				const tokenRec = isEnterprise ? await this.tokenService.createVerificationCode(existingUser.id) : await this.tokenService.createVerificationToken(existingUser.id);
-				const verificationUrl = isEnterprise ? undefined : this.urlService.verificationUrl(tokenRec.token);
+				const usesCodeVerification = this.usesCodeVerification(existingUser.kind);
+				const tokenRec = usesCodeVerification ? await this.tokenService.createVerificationCode(existingUser.id) : await this.tokenService.createVerificationToken(existingUser.id);
+				const verificationUrl = usesCodeVerification ? undefined : this.urlService.verificationUrl(tokenRec.token);
 
 				const emailContext = {
-					fullName: dto.fullName ?? existingUser.email,
-					businessName: dto.businessName ?? "",
+					fullName: normalized.fullName ?? existingUser.email,
+					businessName: normalized.businessName ?? "",
 					verificationUrl,
-					verificationCode: isEnterprise ? tokenRec.token : undefined,
-					phoneNumber: dto.phoneNumber,
+					verificationCode: usesCodeVerification ? tokenRec.token : undefined,
+					phoneNumber: normalized.phoneNumber,
 				};
 
 				try {
@@ -84,7 +133,7 @@ export class AuthService {
 
 				return {
 					ok: true,
-					message: isEnterprise ? "Account exists but not verified — verification code resent." : "Account exists but not verified — verification email resent.",
+					message: usesCodeVerification ? "Account exists but not verified — verification code resent." : "Account exists but not verified — verification email resent.",
 				};
 			}
 
@@ -105,11 +154,13 @@ export class AuthService {
 			const { company, user } = await this.prisma.$transaction(async (tx) => {
 				const newCompany = await tx.company.create({
 					data: {
-						fullName: dto.fullName,
-						phoneNumber: dto.phoneNumber,
-						emailAddress: dto.emailAddress,
-						businessName: dto.businessName,
-						businessAddress: dto.businessAddress,
+						fullName: normalized.fullName!,
+						phoneNumber: normalized.phoneNumber!,
+						emailAddress: normalized.emailAddress!,
+						businessName: normalized.businessName!,
+						businessAddress: normalized.businessAddress!,
+						country: normalized.country,
+						language: normalized.language,
 						role: dto.kind === RegisterKind.LOGISTIC_SERVICE_PROVIDER ? dto.role : null,
 						documents: {
 							create: results.map((r, idx) => ({
@@ -122,8 +173,8 @@ export class AuthService {
 
 				const newUser = await tx.user.create({
 					data: {
-						email: dto.emailAddress,
-						phone: dto.phoneNumber,
+						email: normalized.emailAddress,
+						phone: normalized.phoneNumber,
 						kind: dto.kind,
 						companyId: newCompany.id,
 						isVerified: false,
@@ -136,16 +187,16 @@ export class AuthService {
 				};
 			});
 
-			const isEnterprise = dto.kind === RegisterKind.ENTERPRISE;
-			const tokenRec = isEnterprise ? await this.tokenService.createVerificationCode(user.id) : await this.tokenService.createVerificationToken(user.id);
-			const verificationUrl = isEnterprise ? undefined : this.urlService.verificationUrl(tokenRec.token);
+			const usesCodeVerification = this.usesCodeVerification(dto.kind);
+			const tokenRec = usesCodeVerification ? await this.tokenService.createVerificationCode(user.id) : await this.tokenService.createVerificationToken(user.id);
+			const verificationUrl = usesCodeVerification ? undefined : this.urlService.verificationUrl(tokenRec.token);
 
 			const emailContext = {
-				fullName: dto.fullName,
-				businessName: dto.businessName,
+				fullName: normalized.fullName,
+				businessName: normalized.businessName,
 				verificationUrl,
-				verificationCode: isEnterprise ? tokenRec.token : undefined,
-				phoneNumber: dto.phoneNumber,
+				verificationCode: usesCodeVerification ? tokenRec.token : undefined,
+				phoneNumber: normalized.phoneNumber,
 			};
 
 			try {
@@ -172,7 +223,7 @@ export class AuthService {
 
 			return {
 				ok: true,
-				verificationMethod: isEnterprise ? "CODE" : "EMAIL_LINK",
+				verificationMethod: usesCodeVerification ? "CODE" : "EMAIL_LINK",
 			};
 		} catch (err: any) {
 			if (err?.code === "P2002") {
@@ -181,7 +232,6 @@ export class AuthService {
 			throw new BadRequestException(err.message || "Registration failed");
 		}
 	}
-
 	async verifyEmail(token: string) {
 		const rec = await this.tokenService.findVerificationToken(token);
 
@@ -198,7 +248,7 @@ export class AuthService {
 		};
 	}
 
-	async verifyEnterprisePhoneCode(emailAddress: string, verificationCode: string) {
+	async verifyPhoneCode(emailAddress: string, verificationCode: string) {
 		if (!emailAddress) throw new BadRequestException("Missing emailAddress");
 		if (!verificationCode) throw new BadRequestException("Missing verificationCode");
 
@@ -209,8 +259,8 @@ export class AuthService {
 			throw new BadRequestException("Invalid or expired verification code");
 		}
 
-		if (rec.user?.kind !== RegisterKind.ENTERPRISE) {
-			throw new BadRequestException("Verification code is only supported for enterprise accounts");
+		if (!this.usesCodeVerification(rec.user?.kind)) {
+			throw new BadRequestException("Verification code is only supported for enterprise and individual accounts");
 		}
 
 		const setupToken = randomBytes(24).toString("hex");
