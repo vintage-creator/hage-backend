@@ -504,6 +504,72 @@ import {
 		},
 	  };
 	}
+
+	async refreshSession(refreshToken: string) {
+	  if (!refreshToken) throw new UnauthorizedException("Missing refresh token");
+
+	  const tokenHash = this.hashToken(refreshToken);
+	  const stored = await this.prisma.refreshToken.findFirst({
+		where: { tokenHash },
+		include: {
+		  user: {
+			include: {
+			  company: true,
+			},
+		  },
+		},
+	  });
+
+	  if (!stored || stored.expiresAt < new Date()) {
+		if (stored) {
+		  await this.prisma.refreshToken.delete({ where: { id: stored.id } });
+		}
+		throw new UnauthorizedException("Invalid or expired refresh token");
+	  }
+
+	  const payload = {
+		sub: stored.user.id,
+		email: stored.user.email,
+		kind: stored.user.kind,
+	  };
+
+	  const accessToken = this.signAccessToken(payload);
+	  const rawRefresh = this.createRefreshTokenRaw();
+	  const newTokenHash = this.hashToken(rawRefresh);
+	  const expiresAt = add(new Date(), { days: this.refreshDays });
+
+	  await this.prisma.$transaction([
+		this.prisma.refreshToken.delete({ where: { id: stored.id } }),
+		this.prisma.refreshToken.create({
+		  data: {
+			userId: stored.user.id,
+			tokenHash: newTokenHash,
+			userAgent: stored.userAgent,
+			expiresAt,
+		  },
+		}),
+	  ]);
+
+	  return {
+		accessToken,
+		refreshToken: rawRefresh,
+		user: {
+		  id: stored.user.id,
+		  email: stored.user.email,
+		  profilePicture: stored.user.profilePicture,
+		  phone: stored.user.phone,
+		  kind: stored.user.kind,
+		  name: stored.user.company?.fullName ?? null,
+		  companyId: stored.user.company?.id ?? null,
+		  company: stored.user.company
+			? {
+				id: stored.user.company.id,
+				businessName: stored.user.company.businessName,
+			  }
+			: null,
+		},
+	  };
+	}
   
 	async logout(input: { userId?: string | null; refreshToken?: string; refreshTokenId?: string }) {
 	  try {

@@ -31,6 +31,7 @@ import { LoginDto } from "./dto/login.dto";
 import { ForgotPasswordRequestDto } from "./dto/forgot-password-request.dto";
 import { LogoutDto } from "./dto/logout.dto";
 import { VerifyPhoneCodeDto } from "./dto/verify-phone-code.dto";
+import { RefreshTokenDto } from "./dto/refresh-token.dto";
 
 type FileFilterCallback = (error: Error | null, acceptFile: boolean) => void;
 
@@ -263,6 +264,21 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async login(@Body() dto: LoginDto) {
     return this.auth.login(dto.identifier, dto.password);
+  }
+
+  @Post("refresh")
+  @ApiOperation({
+    summary: "Refresh access token",
+    description:
+      "Exchange a valid refresh token for a new access token and rotated refresh token.",
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Returns a new access token, refresh token, and user payload",
+  })
+  @HttpCode(HttpStatus.OK)
+  async refresh(@Body() dto: RefreshTokenDto) {
+    return this.auth.refreshSession(dto.refreshToken);
   }
 
   @Post("logout")

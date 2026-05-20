@@ -173,6 +173,16 @@ describe("Auth (e2e) — register / code verify / set-password / login", () => {
       expect(loginRes.body).toHaveProperty("refreshToken");
       expect(loginRes.body).toHaveProperty("user");
       expect(loginRes.body.user.email).toBe(email);
+
+      const refreshRes = await request(app.getHttpServer())
+        .post("/api/auth/refresh")
+        .send({ refreshToken: loginRes.body.refreshToken })
+        .expect(200);
+
+      expect(refreshRes.body).toHaveProperty("accessToken");
+      expect(refreshRes.body).toHaveProperty("refreshToken");
+      expect(refreshRes.body.refreshToken).not.toBe(loginRes.body.refreshToken);
+      expect(refreshRes.body.user.email).toBe(email);
     }
   }, 60000);
 });
