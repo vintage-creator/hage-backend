@@ -5,6 +5,11 @@ permissions:
   contents: read
   pull-requests: write
 
+# Serialize PR preview deploy/cleanup so close does not delete while a deploy is still running.
+concurrency:
+  group: apprunner-pr-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
 on:
   push:
     branches: [ main, develop, prerelease ]
@@ -945,36 +950,79 @@ jobs:
             echo "Found service: $SERVICE_ARN"
             echo "Service status: $SERVICE_STATUS"
             
-            # Wait for service to be in a deletable state if it's still running
-            if [ "$SERVICE_STATUS" = "RUNNING" ]; then
-              echo "Service is running, stopping before deletion..."
-              aws apprunner pause-service \
-                --service-arn "$SERVICE_ARN" \
-                --region ${{ env.AWS_REGION }} || echo "Failed to pause service, continuing with deletion"
-              
-              # Wait for service to stop (max 2 minutes)
-              for i in {1..12}; do
-                CURRENT_STATUS=$(aws apprunner describe-service \
-                  --service-arn "$SERVICE_ARN" \
+            # DeleteService fails with InvalidStateException while Status is OPERATION_IN_PROGRESS.
+            wait_not_operation_in_progress() {
+              local arn="$1"
+              local max_attempts=60
+              local n=1
+              while [ "$n" -le "$max_attempts" ]; do
+                local st
+                st=$(aws apprunner describe-service \
+                  --service-arn "$arn" \
                   --region ${{ env.AWS_REGION }} \
                   --query 'Service.Status' \
-                  --output text)
-                
-                if [ "$CURRENT_STATUS" != "RUNNING" ]; then
-                  echo "Service stopped with status: $CURRENT_STATUS"
-                  break
+                  --output text 2>/dev/null || echo "NOT_FOUND")
+                echo "  describe-service status: $st (attempt $n/$max_attempts)"
+                if [ "$st" = "NOT_FOUND" ]; then
+                  return 0
                 fi
-                
-                echo "Waiting for service to stop... ($i/12)"
+                if [ "$st" != "OPERATION_IN_PROGRESS" ]; then
+                  return 0
+                fi
                 sleep 10
+                n=$((n+1))
               done
-            fi
+              echo "ERROR: Timed out waiting for App Runner to leave OPERATION_IN_PROGRESS"
+              return 1
+            }
             
-            echo "Deleting service..."
-            aws apprunner delete-service \
-              --service-arn "$SERVICE_ARN" \
-              --region ${{ env.AWS_REGION }}
+            delete_service_with_retries() {
+              local arn="$1"
+              local attempt=1
+              local max_delete_attempts=6
+              while [ "$attempt" -le "$max_delete_attempts" ]; do
+                wait_not_operation_in_progress "$arn" || return 1
+                local st
+                st=$(aws apprunner describe-service \
+                  --service-arn "$arn" \
+                  --region ${{ env.AWS_REGION }} \
+                  --query 'Service.Status' \
+                  --output text 2>/dev/null || echo "NOT_FOUND")
+                if [ "$st" = "NOT_FOUND" ]; then
+                  echo "Service already deleted"
+                  return 0
+                fi
+                if [ "$st" = "RUNNING" ]; then
+                  echo "Pausing service before deletion (status: $st)..."
+                  aws apprunner pause-service \
+                    --service-arn "$arn" \
+                    --region ${{ env.AWS_REGION }} || echo "pause-service failed, will retry delete"
+                  wait_not_operation_in_progress "$arn" || return 1
+                fi
+                echo "delete-service attempt $attempt/$max_delete_attempts..."
+                if aws apprunner delete-service \
+                  --service-arn "$arn" \
+                  --region ${{ env.AWS_REGION }} 2>delete_err.txt; then
+                  rm -f delete_err.txt
+                  return 0
+                fi
+                if grep -q InvalidStateException delete_err.txt 2>/dev/null; then
+                  cat delete_err.txt
+                  echo "Delete rejected (invalid state), retrying in 30s..."
+                  rm -f delete_err.txt
+                  sleep 30
+                  attempt=$((attempt+1))
+                  continue
+                fi
+                cat delete_err.txt
+                rm -f delete_err.txt
+                return 1
+              done
+              echo "ERROR: delete-service failed after $max_delete_attempts attempts"
+              return 1
+            }
             
+            delete_service_with_retries "$SERVICE_ARN" || exit 1
             echo "Service deleted successfully"
             
             # Also clean up associated ECR images for this PR
@@ -1046,11 +1094,32 @@ jobs:
             if [ "$created_timestamp" -lt "$seven_days_ago" ]; then
               echo "Deleting old service: $service_name (created: $created_at, status: $service_status)"
               
-              # Pause service before deletion if it's running
               if [ "$service_status" = "RUNNING" ]; then
-                echo "  Stopping service before deletion..."
+                echo "  Pausing service before deletion..."
                 aws apprunner pause-service --service-arn "$service_arn" --region ${{ env.AWS_REGION }} || echo "  Failed to pause service, continuing with deletion"
-                sleep 5
+              fi
+              
+              n=1
+              while [ "$n" -le 60 ]; do
+                st=$(aws apprunner describe-service \
+                  --service-arn "$service_arn" \
+                  --region ${{ env.AWS_REGION }} \
+                  --query 'Service.Status' \
+                  --output text 2>/dev/null || echo "NOT_FOUND")
+                echo "  pre-delete status: $st ($n/60)"
+                if [ "$st" = "NOT_FOUND" ]; then
+                  break
+                fi
+                if [ "$st" != "OPERATION_IN_PROGRESS" ]; then
+                  break
+                fi
+                sleep 10
+                n=$((n+1))
+              done
+              if [ "$n" -gt 60 ]; then
+                echo "  ERROR: Timed out waiting for $service_name to leave OPERATION_IN_PROGRESS — skipping delete"
+                ERROR_COUNT=$((ERROR_COUNT + 1))
+                continue
               fi
               
               if aws apprunner delete-service --service-arn "$service_arn" --region ${{ env.AWS_REGION }}; then
