@@ -11,6 +11,7 @@ import { WarehousesModule } from "./modules/warehouses/warehouses.module";
 import { InventoryModule } from "./modules/inventory/inventory.module";
 import { ProfileModule } from './modules/profile/profile.module';
 import { MarketplaceWaitlistModule } from "./modules/marketplace-waitlist/marketplace-waitlist.module";
+import { SettingsModule } from "./modules/settings/settings.module";
 
 
 @Module({
@@ -23,6 +24,7 @@ import { MarketplaceWaitlistModule } from "./modules/marketplace-waitlist/market
     WarehousesModule,
     InventoryModule,
     ProfileModule,
+    SettingsModule,
     MarketplaceWaitlistModule
   ],
   controllers: [],

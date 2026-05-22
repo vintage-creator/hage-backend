@@ -58,13 +58,14 @@ const enterpriseRegistrationSchema = {
 
 const documentRegistrationSchema = {
 	type: "object",
-	required: ["kind", "fullName", "phoneNumber", "emailAddress", "businessName", "businessAddress", "companyCert", "taxCert"],
+	required: ["kind", "language", "fullName", "phoneNumber", "emailAddress", "businessName", "businessAddress", "companyCert", "taxCert"],
 	properties: {
 		kind: {
 			type: "string",
 			enum: ["DISTRIBUTOR", "LOGISTIC_SERVICE_PROVIDER", "LAST_MILE_DELIVERY"],
 			example: "LOGISTIC_SERVICE_PROVIDER",
 		},
+		language: { type: "string", example: "en" },
 		fullName: { type: "string", example: "John Doe" },
 		phoneNumber: { type: "string", example: "+2348010000000" },
 		emailAddress: { type: "string", example: "ops@example.com" },

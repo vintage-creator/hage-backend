@@ -68,6 +68,16 @@ enum NotificationType {
   SMS
 }
 
+enum PaymentMethodType {
+  CARD
+  LOCAL_BANK
+}
+
+enum CardBrand {
+  VISA
+  MASTERCARD
+}
+
 model User {
   id              String   @id @default(cuid())
   email           String?  @unique
@@ -77,6 +87,7 @@ model User {
   kind            UserKind
   companyId       String?
   isVerified      Boolean  @default(false)
+  deactivatedAt   DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -84,6 +95,10 @@ model User {
   verificationTokens  VerificationToken[]
   passwordResetTokens PasswordResetToken[]
   refreshTokens       RefreshToken[]
+  issues              ReportedIssue[]
+  paymentMethods      PaymentMethod[]
+  notificationSetting NotificationSetting?
+  teamInvitesSent     TeamInvite[]
 
   createdShipments      Shipment[]              @relation("ShipmentCreator")
   customerShipments     Shipment[]              @relation("CustomerShipments")
@@ -110,6 +125,7 @@ model Company {
   users             User[]
   Warehouse         Warehouse[] // keep relation to warehouses
   InventoryLocation InventoryLocation[]
+  slaSettings       SlaSetting[]
 
   @@index([emailAddress])
 }
@@ -154,6 +170,87 @@ model RefreshToken {
   expiresAt DateTime
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SlaSetting {
+  id                         String   @id @default(cuid())
+  companyId                  String
+  companyName                String
+  deliveryTimeCommitment     String
+  routeFrom                  String
+  routeTo                    String
+  vehicleType                String
+  onTimeDeliveryTargetValue  Float
+  onTimeDeliveryThresholdType String
+  statePenalty               String
+  stateIncentive             String
+  validityStartDate          DateTime
+  validityEndDate            DateTime
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+}
+
+model ReportedIssue {
+  id        String   @id @default(cuid())
+  userId    String
+  text      String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PaymentMethod {
+  id                    String            @id @default(cuid())
+  userId                String
+  type                  PaymentMethodType
+  cardholderName        String?
+  cardBrand             CardBrand?
+  cardLast4             String?
+  expiration            String?
+  postalCode            String?
+  bankName              String?
+  accountName           String?
+  accountNumberLast4    String?
+  bankSortCode          String?
+  currency              String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model NotificationSetting {
+  id                         String   @id @default(cuid())
+  userId                     String   @unique
+  realTimeShipmentStatus     Boolean  @default(true)
+  messaging                  Boolean  @default(true)
+  escalationsOrDispute       Boolean  @default(true)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model TeamInvite {
+  id          String   @id @default(cuid())
+  invitedById String
+  companyId   String?
+  email       String
+  status      String   @default("PENDING")
+  createdAt   DateTime @default(now())
+
+  invitedBy User @relation(fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@index([invitedById])
+  @@index([companyId])
 }
 
 model Warehouse {

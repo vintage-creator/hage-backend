@@ -381,6 +381,7 @@ export class AuthService {
 
 		const ok = await bcrypt.compare(password, user.password);
 		if (!ok) throw new UnauthorizedException("Invalid credentials");
+		if (user.deactivatedAt) throw new UnauthorizedException("Account deactivated");
 		if (!user.isVerified) throw new UnauthorizedException("Email not verified");
 
 		const payload = {
@@ -443,6 +444,9 @@ export class AuthService {
 
 		if (!stored.user?.isVerified) {
 			throw new UnauthorizedException("Invalid refresh token");
+		}
+		if (stored.user.deactivatedAt) {
+			throw new UnauthorizedException("Account deactivated");
 		}
 
 		const payload = {
