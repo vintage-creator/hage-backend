@@ -14,28 +14,21 @@ import { VerifyController } from './verify.controller';
 import { ResetController } from './reset.controller';
 
 @Module({
-  imports: [
-    ConfigModule,
-    PassportModule,
-    JwtModule.registerAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (cfg: ConfigService): JwtModuleOptions => ({
-        secret: cfg.get<string>('JWT_SECRET') ?? 'unsafe-dev-secret',
-        signOptions: { expiresIn: (cfg.get<string>('JWT_EXPIRES_IN') ?? '1h') as any },
+   imports: [
+      ConfigModule,
+      PassportModule,
+      JwtModule.registerAsync({
+         imports: [ConfigModule],
+         inject: [ConfigService],
+         useFactory: (cfg: ConfigService): JwtModuleOptions => ({
+            secret: cfg.get<string>('JWT_SECRET') ?? 'unsafe-dev-secret',
+            signOptions: { expiresIn: (cfg.get<string>('JWT_EXPIRES_IN') ?? '1h') as any },
+         }),
       }),
-    }),
-    PrismaModule,
-  ],
-  controllers: [AuthController, VerifyController, ResetController],
-  providers: [
-    AuthService,
-    JwtStrategy,
-    MailService,
-    TokenService,
-    UrlService,
-    { provide: 'StorageService', useClass: CloudinaryService },
-  ],
-  exports: [AuthService, TokenService, UrlService],
+      PrismaModule,
+   ],
+   controllers: [AuthController, VerifyController, ResetController],
+   providers: [AuthService, JwtStrategy, MailService, TokenService, UrlService, { provide: 'StorageService', useClass: CloudinaryService }],
+   exports: [AuthService, TokenService, UrlService],
 })
 export class AuthModule {}

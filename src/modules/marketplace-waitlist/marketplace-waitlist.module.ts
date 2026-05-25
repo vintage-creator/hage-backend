@@ -6,7 +6,7 @@ import { MailService } from '../../common/mail/mail.service';
 import { ConfigService } from '@nestjs/config';
 
 @Module({
-  controllers: [MarketplaceWaitlistController],
-  providers: [MarketplaceWaitlistService, PrismaService, MailService, ConfigService],
+   controllers: [MarketplaceWaitlistController],
+   providers: [MarketplaceWaitlistService, PrismaService, MailService, ConfigService],
 })
 export class MarketplaceWaitlistModule {}

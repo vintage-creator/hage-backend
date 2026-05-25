@@ -1,15 +1,15 @@
-import { IsEnum, IsOptional, IsString } from "class-validator";
+import { IsEnum, IsOptional, IsString } from 'class-validator';
 
 export enum ShipmentStatus {
-	PENDING = "PENDING",
-	IN_WAREHOUSE = "IN_WAREHOUSE",
+   PENDING = 'PENDING',
+   IN_WAREHOUSE = 'IN_WAREHOUSE',
 }
 
 export class UpdateStatusDto {
-	@IsEnum(ShipmentStatus)
-	status!: ShipmentStatus;
+   @IsEnum(ShipmentStatus)
+   status!: ShipmentStatus;
 
-	@IsString()
-	@IsOptional()
-	note?: string;
+   @IsString()
+   @IsOptional()
+   note?: string;
 }
