@@ -15,10 +15,11 @@ async function bootstrap() {
     exclude: ['verify-email', 'reset-password'],
   });  
 
+  const port = Number(process.env.PORT || 3000);
+  const isDev = process.env.NODE_ENV !== "production";
   const swaggerServerUrl =
     process.env.SWAGGER_SERVER_URL ||
-    process.env.APP_URL ||
-    (process.env.NODE_ENV === "production" ? "https://api.tryhage.com" : undefined);
+    (isDev ? `http://localhost:${port}` : process.env.APP_URL || "https://api.tryhage.com");
 
   const swaggerBuilder = new DocumentBuilder()
     .setTitle("Hage Logistics API")
@@ -39,7 +40,6 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup("api/docs", app, document);
 
-  const port = Number(process.env.PORT || 3000);
   await app.listen(port);
   console.log(
     `Server listening on http://localhost:${port}/ (Swagger: /api/docs)`

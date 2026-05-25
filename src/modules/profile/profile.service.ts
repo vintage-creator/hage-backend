@@ -79,23 +79,17 @@ export class ProfileService {
 		}
 
 		// Count shipments by status for this user
-		const [delivered, pending, failed] = await Promise.all([
+		const [inWarehouse, pending] = await Promise.all([
 			this.prisma.shipment.count({
 				where: {
 					createdBy: userId,
-					status: { in: ["DELIVERED", "COMPLETED"] as any },
+					status: "IN_WAREHOUSE",
 				},
 			}),
 			this.prisma.shipment.count({
 				where: {
 					createdBy: userId,
-					status: "PENDING" as any,
-				},
-			}),
-			this.prisma.shipment.count({
-				where: {
-					createdBy: userId,
-					status: { in: ["FAILED", "CANCELLED"] as any },
+					status: "PENDING",
 				},
 			}),
 		]);
@@ -104,9 +98,8 @@ export class ProfileService {
 			businessName: user.company?.businessName ?? user.company?.fullName ?? null,
 			kind: user.kind,
 			dashboard: {
-				delivered,
+				inWarehouse,
 				pending,
-				failed,
 			},
 		};
 	}
