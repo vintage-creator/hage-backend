@@ -49,9 +49,37 @@ enum InventoryCondition {
   EXPIRED
 }
 
+enum ShipmentType {
+  INLAND
+  CROSS_BORDER
+}
+
+enum Visibility {
+  PUBLIC
+  PRIVATE
+  ASSIGNED
+}
+
+enum FreightType {
+  SEA_FREIGHT
+  AIR_FREIGHT
+}
+
 enum ShipmentStatus {
   PENDING
+  ACCEPTED
   IN_WAREHOUSE
+  IN_TRANSIT
+  PICKED_UP
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+enum BidStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
 }
 
 enum DocumentType {
@@ -106,6 +134,10 @@ model User {
   ShipmentStatusHistory ShipmentStatusHistory[]
   Notification          Notification[]
   inventory             Inventory[]
+  bids                  TransporterBid[]        @relation("TransporterBids")
+  ratingsReceived       TransporterRating[]     @relation("RatingsReceived")
+  ratingsGiven          TransporterRating[]     @relation("RatingsGiven")
+  payments              Payment[]
 }
 
 model Company {
@@ -428,6 +460,11 @@ model Shipment {
   id      String @id @default(uuid())
   orderId String @unique // e.g. SHP-2025-00001
 
+  // SHIPMENT TYPE & VISIBILITY
+  shipmentType ShipmentType @default(INLAND)
+  visibility   Visibility   @default(PUBLIC)
+  freightType  FreightType? // cross-border only
+
   // CLIENT DETAILS
   clientName String
   email      String?
@@ -435,27 +472,47 @@ model Shipment {
 
   // CARGO DETAILS
   cargoType            String
-  tons                 Float
-  weight               Float
+  tons                 Float   @default(0)
+  weight               Float   @default(0)
   handlingInstructions String?
   specialHandling      String?
   itemCompactibility   String?
+
+  // INLAND-SPECIFIC
+  truckType String? // e.g. Tipper, Flatbed
+  truckSize String? // e.g. 20 Tons
+
+  // CROSS-BORDER SPECIFIC
+  destinationCountry  String?
+  customDocumentUrls  String[] @default([])
+  cargoDuty           Float?
+
+  // ITEM & CUSTOMER DETAILS
+  nameOfItem    String?
+  customerName  String?
+  customerPhone String?
+  additionalNote String?
 
   // ORIGIN & DESTINATION (JSON format)
   origin      Json // {country, region, state, lga, address}
   destination Json
 
   // PICKUP & DELIVERY
-  pickupMode   String
-  pickupDate   DateTime?
-  deliveryDate DateTime?
+  pickupMode          String
+  pickupDate          DateTime?
+  pickupTimeslot      String?
+  bookingOfficerPhone String?
+  waybillUrl          String?
+  deliveryDate        DateTime?
+  orderNumber         String?
 
   // SERVICE & PRICING
-  serviceType  String
-  baseFrieght  Float
-  handlingFee  Float
-  insuranceFee Float?
-  totalCost    Float
+  serviceType    String
+  baseFrieght    Float  @default(0)
+  handlingFee    Float  @default(0)
+  insuranceFee   Float?
+  transactionFee Float  @default(0)
+  totalCost      Float  @default(0)
 
   // STATUS & ASSIGNMENT
   status                ShipmentStatus @default(PENDING)
@@ -477,21 +534,22 @@ model Shipment {
   customer    User       @relation("CustomerShipments", fields: [customerId], references: [id])
   transporter User?      @relation("TransporterShipments", fields: [assignedTransporterId], references: [id])
   warehouse   Warehouse? @relation("WarehouseShipments", fields: [assignedWarehouseId], references: [id])
+  zone        Zone?      @relation(fields: [assignedZoneId], references: [id])
+  rack        Rack?      @relation(fields: [assignedRackId], references: [id])
+  bin         Bin?       @relation(fields: [assignedBinId], references: [id])
 
-  // Optional relations (you can uncomment if you have Zone, Rack, Bin models)
-  zone Zone? @relation(fields: [assignedZoneId], references: [id])
-  rack Rack? @relation(fields: [assignedRackId], references: [id])
-  bin  Bin?  @relation(fields: [assignedBinId], references: [id])
-
-  //inventory     Inventory[]
   documents     ShipmentDocument[]
   statusHistory ShipmentStatusHistory[]
   events        TrackingEvent[]
+  bids          TransporterBid[]
+  payment       Payment?
 
   @@index([orderId])
   @@index([status])
   @@index([customerId])
   @@index([createdBy])
+  @@index([shipmentType])
+  @@index([visibility])
   @@index([assignedWarehouseId])
   @@index([assignedZoneId])
   @@index([assignedRackId])
@@ -559,4 +617,62 @@ model MarketplaceWaitlist {
   country   String
   industry  String
   createdAt DateTime @default(now())
+}
+
+model TransporterBid {
+  id            String    @id @default(cuid())
+  shipmentId    String
+  transporterId String
+  price         Float
+  status        BidStatus @default(PENDING)
+  note          String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  shipment    Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  transporter User     @relation("TransporterBids", fields: [transporterId], references: [id])
+
+  @@unique([shipmentId, transporterId])
+  @@index([shipmentId])
+  @@index([transporterId])
+  @@index([status])
+}
+
+model TransporterRating {
+  id            String   @id @default(cuid())
+  transporterId String
+  ratedById     String
+  shipmentId    String?
+  rating        Int      // 1–5
+  comment       String?
+  createdAt     DateTime @default(now())
+
+  transporter User @relation("RatingsReceived", fields: [transporterId], references: [id])
+  ratedBy     User @relation("RatingsGiven", fields: [ratedById], references: [id])
+
+  @@index([transporterId])
+  @@index([ratedById])
+  @@index([shipmentId])
+}
+
+model Payment {
+  id         String   @id @default(cuid())
+  shipmentId String   @unique
+  userId     String
+  amount     Float
+  currency   String   @default("NGN")
+  provider   String   @default("PAYSTACK")
+  reference  String   @unique
+  status     String   @default("PENDING")
+  metadata   Json?
+  paidAt     DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([reference])
+  @@index([status])
 }

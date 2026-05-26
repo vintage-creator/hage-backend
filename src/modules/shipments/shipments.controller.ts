@@ -1,7 +1,9 @@
-// src/modules/shipments/shipments.controller.ts
 import { Controller, Post, Body, Get, Param, Patch, Delete, UseGuards, UseInterceptors, UploadedFiles, Req, Query, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags, ApiConsumes, ApiBody, ApiResponse, ApiQuery, ApiParam, ApiOperation } from '@nestjs/swagger';
 import { FilesInterceptor } from '@nestjs/platform-express';
+import { IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ShipmentsService } from './shipments.service';
 import { CreateShipmentDto } from './dto/create-shipment.dto';
@@ -13,10 +15,27 @@ import { UpdateStatusDto } from './dto/update-status.dto';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 
+class CalculatePriceDto {
+   @ApiPropertyOptional() @IsString() @IsOptional() shipmentType?: string;
+   @ApiPropertyOptional() @IsNumber() @Min(0) @Type(() => Number) @IsOptional() baseFrieght?: number;
+   @ApiPropertyOptional() @IsNumber() @Min(0) @Type(() => Number) @IsOptional() handlingFee?: number;
+   @ApiPropertyOptional() @IsNumber() @Min(0) @Type(() => Number) @IsOptional() insuranceFee?: number;
+   @ApiPropertyOptional() @IsNumber() @Min(0) @Type(() => Number) @IsOptional() cargoDuty?: number;
+}
+
 @ApiTags('shipments')
 @Controller('shipments')
 export class ShipmentsController {
    constructor(private readonly svc: ShipmentsService) {}
+
+   // CALCULATE PRICE (summary screen)
+   @Post('calculate-price')
+   @UseGuards(JwtAuthGuard)
+   @ApiBearerAuth('access-token')
+   @ApiOperation({ summary: 'Calculate shipment price breakdown', description: 'Returns shippingCost, cargoDuty, transactionFee, and total for the summary screen.' })
+   calculatePrice(@Body() dto: CalculatePriceDto) {
+      return this.svc.calculatePrice({ ...dto, shipmentType: dto.shipmentType ?? 'INLAND' });
+   }
 
    // ✅ CREATE SHIPMENT
    @Post()
@@ -33,52 +52,42 @@ export class ShipmentsController {
       schema: {
          type: 'object',
          properties: {
+            shipmentType: { type: 'string', enum: ['INLAND', 'CROSS_BORDER'], default: 'INLAND' },
+            visibility: { type: 'string', enum: ['PUBLIC', 'PRIVATE', 'ASSIGNED'], default: 'PUBLIC' },
+            freightType: { type: 'string', enum: ['SEA_FREIGHT', 'AIR_FREIGHT'], description: 'Cross-border only' },
             orderId: { type: 'string' },
             clientName: { type: 'string' },
             email: { type: 'string', format: 'email' },
             phone: { type: 'string' },
+            nameOfItem: { type: 'string' },
+            customerName: { type: 'string' },
+            customerPhone: { type: 'string' },
+            additionalNote: { type: 'string' },
             cargoType: { type: 'string' },
             tons: { type: 'number' },
             weight: { type: 'number' },
-            handlingInstructions: { type: 'string' },
-            origin: {
-               type: 'object',
-               properties: {
-                  country: { type: 'string' },
-                  state: { type: 'string' },
-                  address: { type: 'string' },
-                  phone: { type: 'string' },
-               },
-            },
-            destination: {
-               type: 'object',
-               properties: {
-                  country: { type: 'string' },
-                  state: { type: 'string' },
-                  address: { type: 'string' },
-                  phone: { type: 'string' },
-               },
-            },
-            pickupMode: {
-               type: 'string',
-               enum: ['AIR_FREIGHT', 'SEA_FREIGHT', 'ROAD'],
-            },
+            truckType: { type: 'string', description: 'Inland only — e.g. Tipper, Flatbed' },
+            truckSize: { type: 'string', description: 'Inland only — e.g. 20 Tons' },
+            destinationCountry: { type: 'string', description: 'Cross-border only' },
+            cargoDuty: { type: 'number', description: 'Cross-border only' },
+            origin: { type: 'object', properties: { country: { type: 'string' }, state: { type: 'string' }, address: { type: 'string' }, phone: { type: 'string' } } },
+            destination: { type: 'object', properties: { country: { type: 'string' }, state: { type: 'string' }, address: { type: 'string' }, phone: { type: 'string' } } },
+            pickupMode: { type: 'string', enum: ['AIR_FREIGHT', 'SEA_FREIGHT', 'ROAD'], default: 'ROAD' },
             pickupDate: { type: 'string', format: 'date-time' },
+            pickupTimeslot: { type: 'string', description: 'e.g. Morning, Afternoon, Evening' },
+            bookingOfficerPhone: { type: 'string' },
+            waybillUrl: { type: 'string' },
             deliveryDate: { type: 'string', format: 'date-time' },
-            serviceType: {
-               type: 'string',
-               enum: ['EXPRESS_SHIPPING', 'REGULAR_SHIPPING', 'COLDCHAIN_SHIPPING'],
-            },
+            orderNumber: { type: 'string' },
+            serviceType: { type: 'string', enum: ['EXPRESS_SHIPPING', 'REGULAR_SHIPPING', 'COLDCHAIN_SHIPPING'] },
             baseFrieght: { type: 'number' },
             handlingFee: { type: 'number' },
             insuranceFee: { type: 'number' },
-            // files
-            documents: {
-               type: 'array',
-               items: { type: 'string', format: 'binary' },
-            },
+            transactionFee: { type: 'number' },
+            transporterId: { type: 'string', description: 'Pre-select a transporter (PRIVATE/ASSIGNED only)' },
+            documents: { type: 'array', items: { type: 'string', format: 'binary' } },
          },
-         required: ['clientName', 'cargoType', 'weight', 'origin', 'destination', 'pickupMode', 'serviceType', 'baseFrieght', 'handlingFee'],
+         required: ['shipmentType'],
       },
    })
    @ApiResponse({

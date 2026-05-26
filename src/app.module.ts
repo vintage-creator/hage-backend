@@ -1,4 +1,3 @@
-// src/app.module.ts
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './prisma/prisma.module';
@@ -12,6 +11,9 @@ import { InventoryModule } from './modules/inventory/inventory.module';
 import { ProfileModule } from './modules/profile/profile.module';
 import { MarketplaceWaitlistModule } from './modules/marketplace-waitlist/marketplace-waitlist.module';
 import { SettingsModule } from './modules/settings/settings.module';
+import { TransporterBidModule } from './modules/transporter-bid/transporter-bid.module';
+import { TransporterRatingModule } from './modules/transporter-rating/transporter-rating.module';
+import { PaymentModule } from './modules/payment/payment.module';
 
 @Module({
    imports: [
@@ -25,6 +27,9 @@ import { SettingsModule } from './modules/settings/settings.module';
       ProfileModule,
       SettingsModule,
       MarketplaceWaitlistModule,
+      TransporterBidModule,
+      TransporterRatingModule,
+      PaymentModule,
    ],
    controllers: [],
    providers: [],
