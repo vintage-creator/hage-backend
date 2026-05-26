@@ -1058,6 +1058,9 @@ jobs:
     needs: determine-strategy
     if: github.event_name == 'schedule'
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -1065,110 +1068,172 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Cleanup orphaned preview services
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo "Running scheduled cleanup of orphaned preview services..."
-          
+
+          # PR previews are deleted only when the PR is no longer open.
+          # Prerelease previews still use a 7-day age threshold.
+          OPEN_PR_LIST=$(mktemp)
+          gh pr list --repo "${{ github.repository }}" --state open --limit 500 \
+            --json number --jq '.[].number' | sort -n > "$OPEN_PR_LIST"
+          echo "Open PRs on ${{ github.repository }}: $(wc -l < "$OPEN_PR_LIST" | tr -d ' ')"
+
+          is_pr_open() {
+            grep -qx "$1" "$OPEN_PR_LIST"
+          }
+
+          is_older_than_days() {
+            local ts cutoff
+            ts=$(date -d "$1" +%s)
+            cutoff=$(date -d "${2} days ago" +%s)
+            [ "$ts" -lt "$cutoff" ]
+          }
+
+          should_delete_preview_service() {
+            local name="$1"
+            local created_at="$2"
+            if [[ "$name" =~ ^hage-mvp-app-pr-([0-9]+)$ ]]; then
+              local pr_num="${BASH_REMATCH[1]}"
+              if is_pr_open "$pr_num"; then
+                echo "  Keeping $name: PR #$pr_num is still open"
+                return 1
+              fi
+              echo "  Eligible for cleanup: PR #$pr_num is not open"
+              return 0
+            fi
+            if [ "$name" = "hage-mvp-app-prerelease" ]; then
+              if is_older_than_days "$created_at" 7; then
+                echo "  Eligible for cleanup: prerelease service is older than 7 days"
+                return 0
+              fi
+              echo "  Keeping $name: prerelease service is less than 7 days old"
+              return 1
+            fi
+            echo "  Keeping $name: unrecognized preview service name"
+            return 1
+          }
+
+          should_delete_preview_image() {
+            local tag="$1"
+            local pushed_at="$2"
+            if [[ "$tag" =~ ^pr-([0-9]+)- ]]; then
+              local pr_num="${BASH_REMATCH[1]}"
+              if is_pr_open "$pr_num"; then
+                echo "  Keeping image $tag: PR #$pr_num is still open"
+                return 1
+              fi
+              echo "  Eligible for cleanup: PR #$pr_num image (PR not open)"
+              return 0
+            fi
+            if [[ "$tag" =~ ^prerelease- ]]; then
+              if is_older_than_days "$pushed_at" 7; then
+                return 0
+              fi
+              echo "  Keeping image $tag: less than 7 days old"
+              return 1
+            fi
+            return 1
+          }
+
           # Get all preview services with more detailed info
           SERVICES=$(aws apprunner list-services \
             --region ${{ env.AWS_REGION }} \
             --query "ServiceSummaryList[?contains(ServiceName, \`hage-mvp-app-pr-\`) || contains(ServiceName, \`hage-mvp-app-prerelease\`)].{Name:ServiceName,Arn:ServiceArn,CreatedAt:CreatedAt,Status:Status}" \
             --output json)
-          
+
           echo "Found preview services:"
           echo "$SERVICES" | jq -r '.[] | "  - \(.Name) (Status: \(.Status), Created: \(.CreatedAt))"'
-          
+
           CLEANUP_COUNT=0
           ERROR_COUNT=0
-          
-          # Delete services older than 7 days
-          echo "$SERVICES" | jq -r ".[] | select(.CreatedAt != null) | select(.Name != null) | .Arn + \"|\" + .CreatedAt + \"|\" + .Name + \"|\" + .Status" | while read line; do
+
+          while IFS= read -r line; do
             service_arn=$(echo "$line" | cut -d"|" -f1)
             created_at=$(echo "$line" | cut -d"|" -f2)
             service_name=$(echo "$line" | cut -d"|" -f3)
             service_status=$(echo "$line" | cut -d"|" -f4)
-            
-            # Convert to timestamp and check if older than 7 days
-            created_timestamp=$(date -d "$created_at" +%s)
-            seven_days_ago=$(date -d "7 days ago" +%s)
-            
-            if [ "$created_timestamp" -lt "$seven_days_ago" ]; then
-              echo "Deleting old service: $service_name (created: $created_at, status: $service_status)"
-              
-              if [ "$service_status" = "RUNNING" ]; then
-                echo "  Pausing service before deletion..."
-                aws apprunner pause-service --service-arn "$service_arn" --region ${{ env.AWS_REGION }} || echo "  Failed to pause service, continuing with deletion"
-              fi
-              
-              n=1
-              while [ "$n" -le 60 ]; do
-                st=$(aws apprunner describe-service \
-                  --service-arn "$service_arn" \
-                  --region ${{ env.AWS_REGION }} \
-                  --query 'Service.Status' \
-                  --output text 2>/dev/null || echo "NOT_FOUND")
-                echo "  pre-delete status: $st ($n/60)"
-                if [ "$st" = "NOT_FOUND" ]; then
-                  break
-                fi
-                if [ "$st" != "OPERATION_IN_PROGRESS" ]; then
-                  break
-                fi
-                sleep 10
-                n=$((n+1))
-              done
-              if [ "$n" -gt 60 ]; then
-                echo "  ERROR: Timed out waiting for $service_name to leave OPERATION_IN_PROGRESS — skipping delete"
-                ERROR_COUNT=$((ERROR_COUNT + 1))
-                continue
-              fi
-              
-              if aws apprunner delete-service --service-arn "$service_arn" --region ${{ env.AWS_REGION }}; then
-                echo "  Successfully deleted $service_name"
-                CLEANUP_COUNT=$((CLEANUP_COUNT + 1))
-              else
-                echo "  Failed to delete $service_name"
-                ERROR_COUNT=$((ERROR_COUNT + 1))
-              fi
-            else
-              echo "  Keeping service: $service_name (created: $created_at - less than 7 days old)"
+
+            if ! should_delete_preview_service "$service_name" "$created_at"; then
+              continue
             fi
-          done
-          
+
+            echo "Deleting orphaned service: $service_name (created: $created_at, status: $service_status)"
+
+            if [ "$service_status" = "RUNNING" ]; then
+              echo "  Pausing service before deletion..."
+              aws apprunner pause-service --service-arn "$service_arn" --region ${{ env.AWS_REGION }} || echo "  Failed to pause service, continuing with deletion"
+            fi
+
+            n=1
+            while [ "$n" -le 60 ]; do
+              st=$(aws apprunner describe-service \
+                --service-arn "$service_arn" \
+                --region ${{ env.AWS_REGION }} \
+                --query 'Service.Status' \
+                --output text 2>/dev/null || echo "NOT_FOUND")
+              echo "  pre-delete status: $st ($n/60)"
+              if [ "$st" = "NOT_FOUND" ]; then
+                break
+              fi
+              if [ "$st" != "OPERATION_IN_PROGRESS" ]; then
+                break
+              fi
+              sleep 10
+              n=$((n+1))
+            done
+            if [ "$n" -gt 60 ]; then
+              echo "  ERROR: Timed out waiting for $service_name to leave OPERATION_IN_PROGRESS — skipping delete"
+              ERROR_COUNT=$((ERROR_COUNT + 1))
+              continue
+            fi
+
+            if aws apprunner delete-service --service-arn "$service_arn" --region ${{ env.AWS_REGION }}; then
+              echo "  Successfully deleted $service_name"
+              CLEANUP_COUNT=$((CLEANUP_COUNT + 1))
+            else
+              echo "  Failed to delete $service_name"
+              ERROR_COUNT=$((ERROR_COUNT + 1))
+            fi
+          done < <(echo "$SERVICES" | jq -r ".[] | select(.CreatedAt != null) | select(.Name != null) | .Arn + \"|\" + .CreatedAt + \"|\" + .Name + \"|\" + .Status")
+
           echo "Cleanup Summary:"
           echo "  - Services deleted: $CLEANUP_COUNT"
           echo "  - Errors encountered: $ERROR_COUNT"
-          
-          # Also clean up orphaned ECR images older than 7 days
+
+          # Clean up orphaned ECR images for closed PRs; prerelease images still use 7-day age.
           echo "Cleaning up orphaned ECR images..."
           ECR_CLEANUP_COUNT=0
-          
+
           REPO_NAME="hage-mvp-app-${{ env.AWS_ACCOUNT_ID }}"
           IMAGE_DETAILS=$(aws ecr describe-images \
             --repository-name "$REPO_NAME" \
             --region ${{ env.AWS_REGION }} \
             --query 'imageDetails[?imagePushedAt!=null && imageTags!=null]' \
             --output json)
-          
-          echo "$IMAGE_DETAILS" | jq -r '.[] | select((.imageTags[]? | startswith("pr-")) or (.imageTags[]? | startswith("prerelease-"))) | (.imageTags[]? | select(startswith("pr-") or startswith("prerelease-"))) + "|" + (.imagePushedAt|tostring)' | while read line; do
+
+          while IFS= read -r line; do
             image_tag=$(echo "$line" | cut -d"|" -f1)
             pushed_at=$(echo "$line" | cut -d"|" -f2)
-            
-            pushed_timestamp=$(date -d "$pushed_at" +%s)
-            seven_days_ago=$(date -d "7 days ago" +%s)
-            
-            if [ "$pushed_timestamp" -lt "$seven_days_ago" ]; then
-              echo "Deleting old image: $image_tag (pushed: $pushed_at)"
-              if aws ecr batch-delete-image \
-                --repository-name "$REPO_NAME" \
-                --region ${{ env.AWS_REGION }} \
-                --image-ids imageTag="$image_tag"; then
-                echo "  Successfully deleted image: $image_tag"
-                ECR_CLEANUP_COUNT=$((ECR_CLEANUP_COUNT + 1))
-              else
-                echo "  Failed to delete image: $image_tag"
-              fi
+
+            if ! should_delete_preview_image "$image_tag" "$pushed_at"; then
+              continue
             fi
-          done
-          
+
+            echo "Deleting orphaned image: $image_tag (pushed: $pushed_at)"
+            if aws ecr batch-delete-image \
+              --repository-name "$REPO_NAME" \
+              --region ${{ env.AWS_REGION }} \
+              --image-ids imageTag="$image_tag"; then
+              echo "  Successfully deleted image: $image_tag"
+              ECR_CLEANUP_COUNT=$((ECR_CLEANUP_COUNT + 1))
+            else
+              echo "  Failed to delete image: $image_tag"
+            fi
+          done < <(echo "$IMAGE_DETAILS" | jq -r '.[] | select((.imageTags[]? | startswith("pr-")) or (.imageTags[]? | startswith("prerelease-"))) | (.imageTags[]? | select(startswith("pr-") or startswith("prerelease-"))) + "|" + (.imagePushedAt|tostring)')
+
+          rm -f "$OPEN_PR_LIST"
+
           echo "ECR Cleanup Summary:"
           echo "  - Images deleted: $ECR_CLEANUP_COUNT"
