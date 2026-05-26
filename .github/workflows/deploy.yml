@@ -377,31 +377,89 @@ jobs:
           EOF
 
 
+          wait_for_service_running() {
+            local arn="$1"
+            local max_attempts=90
+            local n=1
+            while [ "$n" -le "$max_attempts" ]; do
+              local st
+              st=$(aws apprunner describe-service \
+                --service-arn "$arn" \
+                --region ${{ env.AWS_REGION }} \
+                --query 'Service.Status' \
+                --output text 2>/dev/null || echo "NOT_FOUND")
+              echo "  Waiting for RUNNING — status: $st (attempt $n/$max_attempts)"
+              case "$st" in
+                RUNNING)
+                  return 0
+                  ;;
+                CREATE_FAILED|DELETE_FAILED)
+                  echo "ERROR: Service entered failed state: $st"
+                  return 1
+                  ;;
+                NOT_FOUND)
+                  echo "ERROR: Service not found"
+                  return 1
+                  ;;
+                *)
+                  sleep 10
+                  n=$((n+1))
+                  ;;
+              esac
+            done
+            echo "ERROR: Timed out waiting for service to reach RUNNING (15 min)"
+            return 1
+          }
+
+          wait_for_health_endpoint() {
+            local service_url="$1"
+            local max_attempts=30
+            local n=1
+            while [ "$n" -le "$max_attempts" ]; do
+              if curl -sf --max-time 15 "https://${service_url}/api/health" > /dev/null; then
+                echo "Health endpoint responded OK"
+                return 0
+              fi
+              echo "  Health check pending (attempt $n/$max_attempts)"
+              sleep 10
+              n=$((n+1))
+            done
+            echo "ERROR: Timed out waiting for https://${service_url}/api/health"
+            return 1
+          }
+
           # Check if service exists and create or update accordingly
           SERVICE_ARN="arn:aws:apprunner:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:service/$SERVICE_NAME"
-          
-          if aws apprunner describe-service --service-arn "$SERVICE_ARN" > /dev/null 2>&1; then
+
+          if aws apprunner describe-service --service-arn "$SERVICE_ARN" --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
             echo "Service exists, updating..."
             aws apprunner update-service \
               --service-arn "$SERVICE_ARN" \
               --source-configuration file://apprunner-config.json \
               --health-check-configuration file://health-check-config.json \
               --instance-configuration file://instance-config.json \
-              --network-configuration file://network-config.json
-              
-
-
-
+              --network-configuration file://network-config.json \
+              --region ${{ env.AWS_REGION }}
           else
             echo "Service does not exist, creating..."
-            aws apprunner create-service \
+            CREATE_OUTPUT=$(aws apprunner create-service \
               --service-name "$SERVICE_NAME" \
               --source-configuration file://apprunner-config.json \
               --health-check-configuration file://health-check-config.json \
               --instance-configuration file://instance-config.json \
               --tags Key=Environment,Value="$ENV_TAG" Key=Project,Value=hage-mvp Key=Type,Value=api Key=ManagedBy,Value=github-actions Key=Tier,Value=app-runner \
-              --network-configuration file://network-config.json
+              --network-configuration file://network-config.json \
+              --region ${{ env.AWS_REGION }})
+            SERVICE_ARN=$(echo "$CREATE_OUTPUT" | jq -r '.Service.ServiceArn')
+            if [ -z "$SERVICE_ARN" ] || [ "$SERVICE_ARN" = "null" ]; then
+              echo "ERROR: create-service did not return ServiceArn"
+              exit 1
+            fi
+            echo "Created service: $SERVICE_ARN"
           fi
+
+          echo "Waiting for App Runner deployment to complete..."
+          wait_for_service_running "$SERVICE_ARN" || exit 1
 
           echo "Fetching service URL..."
           SERVICE_INFO=$(aws apprunner describe-service \
@@ -412,8 +470,9 @@ jobs:
           SERVICE_URL=$(echo "$SERVICE_INFO" | jq -r '.Service.ServiceUrl')
 
           echo "Service URL: $SERVICE_URL"
-          echo "Note: Deployment takes approximately 10 minutes to complete."
-          echo "You can monitor the deployment progress in the AWS App Runner console:"
+          echo "Waiting for health check..."
+          wait_for_health_endpoint "$SERVICE_URL" || exit 1
+          echo "Deployment complete. Monitor in AWS App Runner console:"
           echo "   https://console.aws.amazon.com/apprunner/home?region=${{ env.AWS_REGION }}#/services"
 
           # If this is a PR workflow, comment the URL on the PR
@@ -443,21 +502,18 @@ jobs:
             const serviceName = process.env.SERVICE_NAME;
             const serviceUrl = process.env.SERVICE_URL;
             const imageTag = process.env.IMAGE_TAG;
-            const prNumber = ${{ github.event.pull_request.number }};
+            const prNumber = ${{ github.event.number }};
             const commitSha = '${{ github.sha }}'.substring(0, 7);
             
-            const comment = `## Preview Environment Ready!
+            const comment = `## Preview Environment Ready
+            
+            App Runner is **RUNNING** and \`/api/health\` responded successfully.
             
             **Service:** \`${serviceName}\`
             **API Base URL:** \`https://${serviceUrl}/api\`
             **API Documentation:** [View API Docs](https://${serviceUrl}/api/docs)
             **Health Check:** [Check Health](https://${serviceUrl}/api/health)
             **AWS Console:** [View in AWS Console](https://console.aws.amazon.com/apprunner/home?region=${{ env.AWS_REGION }}#/services)
-            
-            ### Deployment Status
-            - Deployment takes approximately 10 minutes to complete
-            - Check the AWS App Runner console for real-time status
-            - Monitor logs in the AWS console for any issues
             
             **Commit:** \`${commitSha}\`
             **Tag:** \`${imageTag}\`
