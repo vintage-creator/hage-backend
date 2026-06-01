@@ -17,7 +17,15 @@ async function bootstrap() {
 
    const port = Number(process.env.PORT || 3000);
    const isDev = process.env.NODE_ENV !== 'production';
-   const swaggerServerUrl = process.env.SWAGGER_SERVER_URL || (isDev ? `http://localhost:${port}` : process.env.APP_URL || 'https://api.tryhage.com');
+   const configuredSwaggerServers = (process.env.SWAGGER_SERVER_URLS || process.env.SWAGGER_SERVER_URL || '')
+      .split(',')
+      .map((url) => url.trim().replace(/\/+$/, ''))
+      .filter(Boolean);
+   const swaggerServerUrls = configuredSwaggerServers.length
+      ? configuredSwaggerServers
+      : isDev
+        ? [process.env.APP_URL || `http://localhost:${port}`]
+        : ['https://hage-backend.onrender.com', 'https://api.tryhage.com'];
 
    const swaggerBuilder = new DocumentBuilder()
       .setTitle('Hage Logistics API')
@@ -26,7 +34,7 @@ async function bootstrap() {
       .addTag('core')
       .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'access-token');
 
-   if (swaggerServerUrl) {
+   for (const swaggerServerUrl of swaggerServerUrls) {
       swaggerBuilder.addServer(swaggerServerUrl.replace(/\/+$/, ''));
    }
 
