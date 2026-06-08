@@ -26,6 +26,23 @@ export class SettingsService {
       return value ? value.slice(-4) : undefined;
    }
 
+   private cleanEmail(email?: string) {
+      return email?.trim();
+   }
+
+   private async ensureEmailAvailable(email: string | undefined, currentUserId: string) {
+      if (!email) return;
+
+      const existingUser = await this.prisma.user.findFirst({
+         where: {
+            email: { equals: email, mode: 'insensitive' },
+            NOT: { id: currentUserId },
+         },
+      });
+
+      if (existingUser) throw new BadRequestException('Email is already registered');
+   }
+
    async createEnterpriseSla(userId: string, dto: CreateSlaDto) {
       const user = await this.getUser(userId);
       if (user.kind !== 'ENTERPRISE') {
@@ -200,6 +217,9 @@ export class SettingsService {
       const user = await this.getUser(userId);
       if (user.kind !== 'ENTERPRISE') throw new ForbiddenException('Enterprise profile update is only available to enterprise users');
       if (!user.companyId) throw new BadRequestException('Company profile is required');
+      const email = this.cleanEmail(dto.email);
+      await this.ensureEmailAvailable(email, userId);
+
       return this.prisma.$transaction(async (tx) => {
          const company = await tx.company.update({
             where: { id: user.companyId! },
@@ -207,14 +227,14 @@ export class SettingsService {
                businessName: dto.enterpriseName,
                fullName: dto.enterpriseName,
                businessAddress: dto.physicalAddress,
-               emailAddress: dto.email,
+               emailAddress: email,
                phoneNumber: dto.phoneNumber,
             },
          });
          const updatedUser = await tx.user.update({
             where: { id: userId },
             data: {
-               email: dto.email,
+               email,
                phone: dto.phoneNumber,
             },
          });
@@ -226,6 +246,9 @@ export class SettingsService {
       const user = await this.getUser(userId);
       if (user.kind !== 'INDIVIDUAL') throw new ForbiddenException('End user profile update is only available to individual users');
       if (!user.companyId) throw new BadRequestException('Profile is required');
+      const email = this.cleanEmail(dto.email);
+      await this.ensureEmailAvailable(email, userId);
+
       return this.prisma.$transaction(async (tx) => {
          const company = await tx.company.update({
             where: { id: user.companyId! },
@@ -233,14 +256,14 @@ export class SettingsService {
                fullName: dto.userName,
                businessName: dto.userName,
                businessAddress: dto.physicalAddress,
-               emailAddress: dto.email,
+               emailAddress: email,
                phoneNumber: dto.phoneNumber,
             },
          });
          const updatedUser = await tx.user.update({
             where: { id: userId },
             data: {
-               email: dto.email,
+               email,
                phone: dto.phoneNumber,
             },
          });

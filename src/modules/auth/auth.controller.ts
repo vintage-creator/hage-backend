@@ -98,7 +98,7 @@ export class AuthController {
    @Post('register-individual')
    @ApiOperation({
       summary: 'Register individual user',
-      description: 'No document upload is required. The user receives a 4 digit verification code by email.',
+      description: 'No document upload is required. The user receives a 4 digit verification code by SMS.',
    })
    @ApiConsumes('multipart/form-data')
    @ApiBody({ schema: individualRegistrationSchema })
@@ -114,7 +114,7 @@ export class AuthController {
    @Post('register-enterprise')
    @ApiOperation({
       summary: 'Register enterprise user',
-      description: 'No document upload is required. The company email receives a 4 digit verification code.',
+      description: 'No document upload is required. The company phone number receives a 4 digit verification code by SMS.',
    })
    @ApiConsumes('multipart/form-data')
    @ApiBody({ schema: enterpriseRegistrationSchema })
@@ -182,7 +182,7 @@ export class AuthController {
    })
    @ApiResponse({
       status: 200,
-      description: 'Code verified — use returned verificationToken to set password',
+      description: 'Phone code verified — verification email sent. Use the email link token to set password.',
    })
    @HttpCode(HttpStatus.OK)
    async verifyPhoneCode(@Body() dto: VerifyPhoneCodeDto) {

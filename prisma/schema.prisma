@@ -82,6 +82,21 @@ enum BidStatus {
   REJECTED
 }
 
+enum CommunicationThreadStatus {
+  ACTIVE
+  CLOSED
+}
+
+enum CallSessionStatus {
+  REQUESTED
+  RINGING
+  ONGOING
+  ENDED
+  MISSED
+  REJECTED
+  CANCELLED
+}
+
 enum DocumentType {
   COMMERCIAL_INVOICE
   PACKING_LIST
@@ -107,17 +122,17 @@ enum CardBrand {
 }
 
 model User {
-  id              String   @id @default(cuid())
-  email           String?  @unique
-  phone           String?  @unique
-  password        String?
-  profilePicture  String?
-  kind            UserKind
-  companyId       String?
-  isVerified      Boolean  @default(false)
-  deactivatedAt   DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String    @id @default(cuid())
+  email          String?   @unique
+  phone          String?   @unique
+  password       String?
+  profilePicture String?
+  kind           UserKind
+  companyId      String?
+  isVerified     Boolean   @default(false)
+  deactivatedAt  DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   company             Company?             @relation(fields: [companyId], references: [id])
   verificationTokens  VerificationToken[]
@@ -138,20 +153,21 @@ model User {
   ratingsReceived       TransporterRating[]     @relation("RatingsReceived")
   ratingsGiven          TransporterRating[]     @relation("RatingsGiven")
   payments              Payment[]
+  communicationMessages CommunicationMessage[]
 }
 
 model Company {
-  id              String   @id @default(cuid())
+  id              String       @id @default(cuid())
   fullName        String
   phoneNumber     String
-  emailAddress    String   @unique
+  emailAddress    String       @unique
   businessName    String
   businessAddress String
   country         String?
   language        String?
   role            CompanyRole?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   documents         TrackingDocument[]
   users             User[]
@@ -205,21 +221,21 @@ model RefreshToken {
 }
 
 model SlaSetting {
-  id                         String   @id @default(cuid())
-  companyId                  String
-  companyName                String
-  deliveryTimeCommitment     String
-  routeFrom                  String
-  routeTo                    String
-  vehicleType                String
-  onTimeDeliveryTargetValue  Float
+  id                          String   @id @default(cuid())
+  companyId                   String
+  companyName                 String
+  deliveryTimeCommitment      String
+  routeFrom                   String
+  routeTo                     String
+  vehicleType                 String
+  onTimeDeliveryTargetValue   Float
   onTimeDeliveryThresholdType String
-  statePenalty               String
-  stateIncentive             String
-  validityStartDate          DateTime
-  validityEndDate            DateTime
-  createdAt                  DateTime @default(now())
-  updatedAt                  DateTime @updatedAt
+  statePenalty                String
+  stateIncentive              String
+  validityStartDate           DateTime
+  validityEndDate             DateTime
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
@@ -238,21 +254,21 @@ model ReportedIssue {
 }
 
 model PaymentMethod {
-  id                    String            @id @default(cuid())
-  userId                String
-  type                  PaymentMethodType
-  cardholderName        String?
-  cardBrand             CardBrand?
-  cardLast4             String?
-  expiration            String?
-  postalCode            String?
-  bankName              String?
-  accountName           String?
-  accountNumberLast4    String?
-  bankSortCode          String?
-  currency              String?
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
+  id                 String            @id @default(cuid())
+  userId             String
+  type               PaymentMethodType
+  cardholderName     String?
+  cardBrand          CardBrand?
+  cardLast4          String?
+  expiration         String?
+  postalCode         String?
+  bankName           String?
+  accountName        String?
+  accountNumberLast4 String?
+  bankSortCode       String?
+  currency           String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -260,13 +276,13 @@ model PaymentMethod {
 }
 
 model NotificationSetting {
-  id                         String   @id @default(cuid())
-  userId                     String   @unique
-  realTimeShipmentStatus     Boolean  @default(true)
-  messaging                  Boolean  @default(true)
-  escalationsOrDispute       Boolean  @default(true)
-  createdAt                  DateTime @default(now())
-  updatedAt                  DateTime @updatedAt
+  id                     String   @id @default(cuid())
+  userId                 String   @unique
+  realTimeShipmentStatus Boolean  @default(true)
+  messaging              Boolean  @default(true)
+  escalationsOrDispute   Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
@@ -404,7 +420,7 @@ model Inventory {
   updatedAt       DateTime @updatedAt
 
   // Relations
- // shipment        Shipment    @relation(fields: [shipmentId], references: [orderId])
+  // shipment        Shipment    @relation(fields: [shipmentId], references: [orderId])
   warehouse Warehouse           @relation(fields: [warehouseId], references: [id])
   locations InventoryLocation[]
   User      User?               @relation(fields: [userId], references: [id])
@@ -483,14 +499,14 @@ model Shipment {
   truckSize String? // e.g. 20 Tons
 
   // CROSS-BORDER SPECIFIC
-  destinationCountry  String?
-  customDocumentUrls  String[] @default([])
-  cargoDuty           Float?
+  destinationCountry String?
+  customDocumentUrls String[] @default([])
+  cargoDuty          Float?
 
   // ITEM & CUSTOMER DETAILS
-  nameOfItem    String?
-  customerName  String?
-  customerPhone String?
+  nameOfItem     String?
+  customerName   String?
+  customerPhone  String?
   additionalNote String?
 
   // ORIGIN & DESTINATION (JSON format)
@@ -538,11 +554,12 @@ model Shipment {
   rack        Rack?      @relation(fields: [assignedRackId], references: [id])
   bin         Bin?       @relation(fields: [assignedBinId], references: [id])
 
-  documents     ShipmentDocument[]
-  statusHistory ShipmentStatusHistory[]
-  events        TrackingEvent[]
-  bids          TransporterBid[]
-  payment       Payment?
+  documents           ShipmentDocument[]
+  statusHistory       ShipmentStatusHistory[]
+  events              TrackingEvent[]
+  bids                TransporterBid[]
+  payment             Payment?
+  communicationThread CommunicationThread?
 
   @@index([orderId])
   @@index([status])
@@ -597,6 +614,60 @@ model TrackingEvent {
   @@index([shipmentId])
 }
 
+model CommunicationThread {
+  id                String                    @id @default(cuid())
+  shipmentId        String                    @unique
+  enterpriseUserId  String
+  transporterUserId String
+  status            CommunicationThreadStatus @default(ACTIVE)
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  shipment Shipment               @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  messages CommunicationMessage[]
+  calls    CallSession[]
+
+  @@index([enterpriseUserId])
+  @@index([transporterUserId])
+}
+
+model CommunicationMessage {
+  id        String    @id @default(cuid())
+  threadId  String
+  senderId  String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  thread CommunicationThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sender User                @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([threadId])
+  @@index([senderId])
+}
+
+model CallSession {
+  id             String            @id @default(cuid())
+  threadId       String
+  shipmentId     String
+  initiatedById  String
+  recipientId    String
+  status         CallSessionStatus @default(REQUESTED)
+  provider       String            @default("IN_APP")
+  providerCallId String?
+  startedAt      DateTime?
+  endedAt        DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  thread CommunicationThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId])
+  @@index([shipmentId])
+  @@index([initiatedById])
+  @@index([recipientId])
+}
+
 model Notification {
   id        String           @id @default(cuid())
   userId    String
@@ -643,7 +714,7 @@ model TransporterRating {
   transporterId String
   ratedById     String
   shipmentId    String?
-  rating        Int      // 1–5
+  rating        Int // 1–5
   comment       String?
   createdAt     DateTime @default(now())
 
@@ -656,18 +727,18 @@ model TransporterRating {
 }
 
 model Payment {
-  id         String   @id @default(cuid())
-  shipmentId String   @unique
+  id         String    @id @default(cuid())
+  shipmentId String    @unique
   userId     String
   amount     Float
-  currency   String   @default("NGN")
-  provider   String   @default("PAYSTACK")
-  reference  String   @unique
-  status     String   @default("PENDING")
+  currency   String    @default("NGN")
+  provider   String    @default("PAYSTACK")
+  reference  String    @unique
+  status     String    @default("PENDING")
   metadata   Json?
   paidAt     DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
   user     User     @relation(fields: [userId], references: [id])

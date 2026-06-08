@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import type { StorageService } from '../../common/storage/storage.interface';
 import { MailService } from '../../common/mail/mail.service';
 import { RegisterCompanyDto, RegisterKind } from './dto/register-company.dto';
+import { TwilioVerifyService } from './twilio-verify.service';
 
 @Injectable()
 export class AuthService {
@@ -22,12 +23,16 @@ export class AuthService {
       return kind === RegisterKind.ENTERPRISE || kind === RegisterKind.INDIVIDUAL;
    }
 
+   private cleanEmail(email?: string | null) {
+      return email?.trim();
+   }
+
    private normalizeRegistration(dto: RegisterCompanyDto) {
       const isIndividual = dto.kind === RegisterKind.INDIVIDUAL;
       const isEnterprise = dto.kind === RegisterKind.ENTERPRISE;
       const fullName = (dto.fullName ?? dto.name ?? dto.companyName ?? dto.businessName)?.trim();
       const phoneNumber = (dto.phoneNumber ?? dto.companyPhoneNumber)?.trim();
-      const emailAddress = (dto.emailAddress ?? dto.companyEmailAddress)?.trim().toLowerCase();
+      const emailAddress = this.cleanEmail(dto.emailAddress ?? dto.companyEmailAddress);
       const businessName = (dto.businessName ?? dto.companyName ?? (isIndividual ? dto.name : undefined) ?? fullName)?.trim();
       const businessAddress = (dto.businessAddress ?? dto.physicalAddress ?? dto.companyAddress)?.trim();
       const country = dto.country?.trim();
@@ -54,6 +59,7 @@ export class AuthService {
       private readonly mailer: MailService,
       private readonly tokenService: TokenService,
       private readonly urlService: UrlService,
+      private readonly twilioVerify: TwilioVerifyService,
    ) {
       this.refreshDays = Number(this.cfg.get('REFRESH_EXPIRES_DAYS') ?? 30);
    }
@@ -96,52 +102,58 @@ export class AuthService {
          throw new BadRequestException(normalized.isEnterprise ? 'companyAddress is required' : 'physicalAddress is required');
       }
 
-      const existingUser = await this.prisma.user.findUnique({
-         where: { email: normalized.emailAddress },
+      const existingUser = await this.prisma.user.findFirst({
+         where: { email: { equals: normalized.emailAddress, mode: 'insensitive' } },
       });
 
       if (existingUser) {
          if (!existingUser.isVerified) {
-            const latestToken = await this.prisma.verificationToken.findFirst({
-               where: { userId: existingUser.id },
-               orderBy: { createdAt: 'desc' },
-            });
+            const usesCodeVerification = this.usesCodeVerification(existingUser.kind);
 
-            if (latestToken) {
-               const msSince = Date.now() - new Date(latestToken.createdAt).getTime();
-               const cooldownMs = 60 * 1000;
-               if (msSince < cooldownMs) {
-                  throw new BadRequestException('Verification email recently sent. Please wait a moment before retrying.');
+            if (!usesCodeVerification) {
+               const latestToken = await this.prisma.verificationToken.findFirst({
+                  where: { userId: existingUser.id },
+                  orderBy: { createdAt: 'desc' },
+               });
+               if (latestToken) {
+                  const msSince = Date.now() - new Date(latestToken.createdAt).getTime();
+                  const cooldownMs = 60 * 1000;
+                  if (msSince < cooldownMs) {
+                     throw new BadRequestException('Verification email recently sent. Please wait a moment before retrying.');
+                  }
                }
             }
 
             await this.tokenService.deleteVerificationTokensByUser(existingUser.id);
-            const usesCodeVerification = this.usesCodeVerification(existingUser.kind);
-            const tokenRec = usesCodeVerification ? await this.tokenService.createVerificationCode(existingUser.id) : await this.tokenService.createVerificationToken(existingUser.id);
-            const verificationUrl = usesCodeVerification ? undefined : this.urlService.verificationUrl(tokenRec.token);
 
-            const emailContext = {
-               fullName: normalized.fullName ?? existingUser.email,
-               businessName: normalized.businessName ?? '',
-               verificationUrl,
-               verificationCode: usesCodeVerification ? tokenRec.token : undefined,
-               phoneNumber: normalized.phoneNumber,
-            };
+            if (usesCodeVerification) {
+               await this.twilioVerify.sendSmsCode(existingUser.phone ?? normalized.phoneNumber!);
+            } else {
+               const tokenRec = await this.tokenService.createVerificationToken(existingUser.id);
+               const verificationUrl = this.urlService.verificationUrl(tokenRec.token);
 
-            try {
-               await this.mailer.sendVerificationEmail(existingUser.email!, emailContext);
-            } catch (emailErr) {
+               const emailContext = {
+                  fullName: normalized.fullName ?? existingUser.email,
+                  businessName: normalized.businessName ?? '',
+                  verificationUrl,
+                  phoneNumber: normalized.phoneNumber,
+               };
+
                try {
-                  await this.tokenService.deleteVerificationTokensByUser(existingUser.id);
-               } catch (e) {
-                  this.logger.error('Failed to cleanup token after email send failure: ' + ((e as any)?.message ?? e));
+                  await this.mailer.sendVerificationEmail(existingUser.email!, emailContext);
+               } catch (emailErr) {
+                  try {
+                     await this.tokenService.deleteVerificationTokensByUser(existingUser.id);
+                  } catch (e) {
+                     this.logger.error('Failed to cleanup token after email send failure: ' + ((e as any)?.message ?? e));
+                  }
+                  throw new BadRequestException('Failed to send verification email. Please try again later.');
                }
-               throw new BadRequestException('Failed to send verification email. Please try again later.');
             }
 
             return {
                ok: true,
-               message: usesCodeVerification ? 'Account exists but not verified — verification code resent.' : 'Account exists but not verified — verification email resent.',
+               message: usesCodeVerification ? 'Account exists but not verified — phone verification code resent.' : 'Account exists but not verified — verification email resent.',
             };
          }
 
@@ -196,20 +208,23 @@ export class AuthService {
          });
 
          const usesCodeVerification = this.usesCodeVerification(dto.kind);
-         const tokenRec = usesCodeVerification ? await this.tokenService.createVerificationCode(user.id) : await this.tokenService.createVerificationToken(user.id);
-         const verificationUrl = usesCodeVerification ? undefined : this.urlService.verificationUrl(tokenRec.token);
-
-         const emailContext = {
-            fullName: normalized.fullName,
-            businessName: normalized.businessName,
-            verificationUrl,
-            verificationCode: usesCodeVerification ? tokenRec.token : undefined,
-            phoneNumber: normalized.phoneNumber,
-         };
-
          try {
-            await this.mailer.sendVerificationEmail(user.email!, emailContext);
-         } catch (emailErr) {
+            if (usesCodeVerification) {
+               await this.twilioVerify.sendSmsCode(user.phone!);
+            } else {
+               const tokenRec = await this.tokenService.createVerificationToken(user.id);
+               const verificationUrl = this.urlService.verificationUrl(tokenRec.token);
+
+               const emailContext = {
+                  fullName: normalized.fullName,
+                  businessName: normalized.businessName,
+                  verificationUrl,
+                  phoneNumber: normalized.phoneNumber,
+               };
+
+               await this.mailer.sendVerificationEmail(user.email!, emailContext);
+            }
+         } catch (verificationErr) {
             try {
                await this.prisma.$transaction([
                   this.prisma.verificationToken.deleteMany({
@@ -223,15 +238,15 @@ export class AuthService {
                   this.prisma.company.delete({ where: { id: company.id } }),
                ]);
             } catch (cleanupErr) {
-               this.logger.error('Failed to cleanup after email send failure: ' + ((cleanupErr as any)?.message ?? String(cleanupErr)));
+               this.logger.error('Failed to cleanup after verification send failure: ' + ((cleanupErr as any)?.message ?? String(cleanupErr)));
             }
 
-            throw new BadRequestException('Failed to send verification email. Please try again.');
+            throw new BadRequestException(usesCodeVerification ? 'Failed to send phone verification code. Please try again.' : 'Failed to send verification email. Please try again.');
          }
 
          return {
             ok: true,
-            verificationMethod: usesCodeVerification ? 'CODE' : 'EMAIL_LINK',
+            verificationMethod: usesCodeVerification ? 'PHONE_CODE' : 'EMAIL_LINK',
          };
       } catch (err: any) {
          if (err?.code === 'P2002') {
@@ -260,30 +275,59 @@ export class AuthService {
       if (!emailAddress) throw new BadRequestException('Missing emailAddress');
       if (!verificationCode) throw new BadRequestException('Missing verificationCode');
 
-      const normalizedEmail = emailAddress.trim().toLowerCase();
-      const rec = await this.tokenService.findVerificationTokenForEmail(normalizedEmail, verificationCode);
+      const normalizedEmail = this.cleanEmail(emailAddress);
+      if (!normalizedEmail) throw new BadRequestException('Missing emailAddress');
+      const user = await this.prisma.user.findFirst({
+         where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
+         include: { company: true },
+      });
 
-      if (!rec || rec.expiresAt < new Date()) {
+      if (!user) {
          throw new BadRequestException('Invalid or expired verification code');
       }
 
-      if (!this.usesCodeVerification(rec.user?.kind)) {
+      if (!this.usesCodeVerification(user.kind)) {
          throw new BadRequestException('Verification code is only supported for enterprise and individual accounts');
       }
 
-      const setupToken = randomBytes(24).toString('hex');
-      const updatedRec = await this.prisma.verificationToken.update({
-         where: { id: rec.id },
-         data: { token: setupToken },
-      });
+      if (!user.phone) {
+         throw new BadRequestException('Phone number is required for verification');
+      }
+
+      const isApproved = await this.twilioVerify.checkSmsCode(user.phone, verificationCode);
+      if (!isApproved) {
+         throw new BadRequestException('Invalid or expired verification code');
+      }
+
+      await this.tokenService.deleteVerificationTokensByUser(user.id);
+      const emailToken = await this.tokenService.createVerificationToken(user.id);
+      const verificationUrl = this.urlService.verificationUrl(emailToken.token);
+
+      const emailContext = {
+         fullName: user.company?.fullName ?? user.email,
+         businessName: user.company?.businessName ?? '',
+         verificationUrl,
+         phoneNumber: user.phone,
+      };
+
+      try {
+         await this.mailer.sendVerificationEmail(user.email!, emailContext);
+      } catch (emailErr) {
+         try {
+            await this.tokenService.deleteVerificationTokensByUser(user.id);
+         } catch (cleanupErr) {
+            this.logger.error('Failed to cleanup token after phone OTP email send failure: ' + ((cleanupErr as any)?.message ?? String(cleanupErr)));
+         }
+         throw new BadRequestException('Phone verified, but failed to send verification email. Please try again.');
+      }
 
       return {
          ok: true,
-         email: rec.user.email ?? null,
-         phone: rec.user.phone ?? null,
-         companyId: rec.user.companyId ?? null,
-         expiresAt: updatedRec.expiresAt,
-         verificationToken: updatedRec.token,
+         message: 'Phone number verified. Verification email sent.',
+         email: user.email ?? null,
+         phone: user.phone ?? null,
+         companyId: user.companyId ?? null,
+         expiresAt: emailToken.expiresAt,
       };
    }
 
@@ -378,8 +422,14 @@ export class AuthService {
    }
 
    async login(identifier: string, password: string) {
+      const normalizedIdentifier = identifier?.trim();
       const user = await this.prisma.user.findFirst({
-         where: { OR: [{ email: identifier }, { phone: identifier }] },
+         where: {
+            OR: [
+               { email: { equals: normalizedIdentifier, mode: 'insensitive' } },
+               { phone: normalizedIdentifier },
+            ],
+         },
          include: {
             company: true,
          },
@@ -526,10 +576,10 @@ export class AuthService {
 
       if (!email) return genericResp;
 
-      const normalized = email.trim().toLowerCase();
+      const normalized = this.cleanEmail(email);
 
-      const user = await this.prisma.user.findUnique({
-         where: { email: normalized },
+      const user = await this.prisma.user.findFirst({
+         where: { email: { equals: normalized, mode: 'insensitive' } },
          include: { company: true },
       });
 
@@ -577,8 +627,10 @@ export class AuthService {
    async resendVerificationEmail(email: string) {
       if (!email) throw new BadRequestException('Missing email');
 
-      const user = await this.prisma.user.findUnique({
-         where: { email },
+      const normalized = this.cleanEmail(email);
+
+      const user = await this.prisma.user.findFirst({
+         where: { email: { equals: normalized, mode: 'insensitive' } },
          include: { company: true },
       });
 
