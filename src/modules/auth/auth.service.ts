@@ -27,15 +27,33 @@ export class AuthService {
       return email?.trim();
    }
 
+   private normalizePhoneNumber(phone?: string | null, country?: string | null) {
+      if (!phone) return undefined;
+
+      const raw = phone.trim();
+      const compact = raw.replace(/[\s().-]/g, '');
+      if (!compact) return undefined;
+
+      const countryValue = country?.trim().toLowerCase();
+      const isNigeria = countryValue === 'nigeria' || countryValue === 'ng';
+
+      if (compact.startsWith('+')) return compact;
+      if (compact.startsWith('00')) return `+${compact.slice(2)}`;
+      if (isNigeria && compact.startsWith('0')) return `+234${compact.slice(1)}`;
+      if (isNigeria && compact.startsWith('234')) return `+${compact}`;
+
+      return compact;
+   }
+
    private normalizeRegistration(dto: RegisterCompanyDto) {
       const isIndividual = dto.kind === RegisterKind.INDIVIDUAL;
       const isEnterprise = dto.kind === RegisterKind.ENTERPRISE;
       const fullName = (dto.fullName ?? dto.name ?? dto.companyName ?? dto.businessName)?.trim();
-      const phoneNumber = (dto.phoneNumber ?? dto.companyPhoneNumber)?.trim();
+      const country = dto.country?.trim();
+      const phoneNumber = this.normalizePhoneNumber(dto.phoneNumber ?? dto.companyPhoneNumber, country);
       const emailAddress = this.cleanEmail(dto.emailAddress ?? dto.companyEmailAddress);
       const businessName = (dto.businessName ?? dto.companyName ?? (isIndividual ? dto.name : undefined) ?? fullName)?.trim();
       const businessAddress = (dto.businessAddress ?? dto.physicalAddress ?? dto.companyAddress)?.trim();
-      const country = dto.country?.trim();
       const language = dto.language?.trim();
 
       return {
@@ -90,6 +108,10 @@ export class AuthService {
          throw new BadRequestException(normalized.isEnterprise ? 'companyPhoneNumber is required' : 'phoneNumber is required');
       }
 
+      if (this.usesCodeVerification(dto.kind) && !/^\+[1-9]\d{7,14}$/.test(normalized.phoneNumber)) {
+         throw new BadRequestException('Phone number must be in international format, for example +2347065737817');
+      }
+
       if (!normalized.emailAddress) {
          throw new BadRequestException(normalized.isEnterprise ? 'companyEmailAddress is required' : 'emailAddress is required');
       }
@@ -127,7 +149,11 @@ export class AuthService {
             await this.tokenService.deleteVerificationTokensByUser(existingUser.id);
 
             if (usesCodeVerification) {
-               await this.twilioVerify.sendSmsCode(existingUser.phone ?? normalized.phoneNumber!);
+               const phoneForVerification = this.normalizePhoneNumber(existingUser.phone ?? normalized.phoneNumber, normalized.country);
+               if (!phoneForVerification || !/^\+[1-9]\d{7,14}$/.test(phoneForVerification)) {
+                  throw new BadRequestException('Phone number must be in international format, for example +2347065737817');
+               }
+               await this.twilioVerify.sendSmsCode(phoneForVerification);
             } else {
                const tokenRec = await this.tokenService.createVerificationToken(existingUser.id);
                const verificationUrl = this.urlService.verificationUrl(tokenRec.token);
@@ -241,7 +267,8 @@ export class AuthService {
                this.logger.error('Failed to cleanup after verification send failure: ' + ((cleanupErr as any)?.message ?? String(cleanupErr)));
             }
 
-            throw new BadRequestException(usesCodeVerification ? 'Failed to send phone verification code. Please try again.' : 'Failed to send verification email. Please try again.');
+            const message = (verificationErr as any)?.response?.message || (verificationErr as any)?.message;
+            throw new BadRequestException(message || (usesCodeVerification ? 'Failed to send phone verification code. Please try again.' : 'Failed to send verification email. Please try again.'));
          }
 
          return {

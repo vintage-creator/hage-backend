@@ -40,7 +40,7 @@ export class TwilioVerifyService {
       } catch (error: any) {
          const message = error?.response?.data?.message ?? error?.message ?? 'Failed to send phone verification code';
          this.logger.error(`Twilio verification send failed: ${message}`);
-         throw new BadRequestException('Failed to send phone verification code. Please try again later.');
+         throw new BadRequestException(`Failed to send phone verification code: ${message}`);
       }
    }
 
