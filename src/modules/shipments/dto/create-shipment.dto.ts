@@ -167,6 +167,31 @@ export class CreateShipmentDto {
    @IsOptional()
    destination?: LocationDto;
 
+   // ─── COORDINATES ───────────────────────────────────────────────────────
+   @ApiPropertyOptional({ description: 'Pickup latitude from Google Maps geocoding' })
+   @IsNumber()
+   @Type(() => Number)
+   @IsOptional()
+   pickupLat?: number;
+
+   @ApiPropertyOptional({ description: 'Pickup longitude from Google Maps geocoding' })
+   @IsNumber()
+   @Type(() => Number)
+   @IsOptional()
+   pickupLng?: number;
+
+   @ApiPropertyOptional({ description: 'Delivery latitude from Google Maps geocoding' })
+   @IsNumber()
+   @Type(() => Number)
+   @IsOptional()
+   deliveryLat?: number;
+
+   @ApiPropertyOptional({ description: 'Delivery longitude from Google Maps geocoding' })
+   @IsNumber()
+   @Type(() => Number)
+   @IsOptional()
+   deliveryLng?: number;
+
    // ─── PICKUP & DELIVERY ─────────────────────────────────────────────────
    @ApiPropertyOptional({ enum: ['AIR_FREIGHT', 'SEA_FREIGHT', 'ROAD'], default: 'ROAD' })
    @IsString()

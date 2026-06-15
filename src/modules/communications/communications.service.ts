@@ -52,10 +52,6 @@ export class CommunicationsService {
       if (!shipment.assignedTransporterId || !shipment.transporter) {
          throw new BadRequestException('Shipment must have an assigned transporter before communications can start');
       }
-      if (shipment.customer.kind !== 'ENTERPRISE') {
-         throw new ForbiddenException('Shipment communications are currently available to enterprise shipments only');
-      }
-
       const isEnterpriseOwner = shipment.customerId === userId || shipment.createdBy === userId;
       const isAssignedTransporter = shipment.assignedTransporterId === userId;
       if (!isEnterpriseOwner && !isAssignedTransporter) {

@@ -1,9 +1,9 @@
 import { Controller, Post, Body, Get, Param, Patch, Delete, UseGuards, UseInterceptors, UploadedFiles, Req, Query, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags, ApiConsumes, ApiBody, ApiResponse, ApiQuery, ApiParam, ApiOperation } from '@nestjs/swagger';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsNumber, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ShipmentsService } from './shipments.service';
 import { CreateShipmentDto } from './dto/create-shipment.dto';
@@ -14,6 +14,11 @@ import { FilterShipmentDto, StatusFilterEnum } from './dto/filter-shipment.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+
+class UpdateLocationDto {
+   @ApiProperty() @IsNumber() @IsNotEmpty() @Type(() => Number) lat!: number;
+   @ApiProperty() @IsNumber() @IsNotEmpty() @Type(() => Number) lng!: number;
+}
 
 class CalculatePriceDto {
    @ApiPropertyOptional() @IsString() @IsOptional() shipmentType?: string;
@@ -382,6 +387,33 @@ export class ShipmentsController {
    update(@Param('id') id: string, @Body() dto: UpdateShipmentDto, @Req() req: Request) {
       const userId = (req.user as any).id;
       return this.svc.update(id, dto, userId);
+   }
+
+   // ✅ GET SHIPMENT LOCATION
+   @Get(':id/location')
+   @UseGuards(JwtAuthGuard)
+   @ApiBearerAuth('access-token')
+   @ApiParam({ name: 'id', description: 'Shipment ID' })
+   @ApiOperation({
+      summary: 'Get shipment coordinates',
+      description: 'Returns pickup, delivery, and current driver coordinates for rendering on the map.',
+   })
+   async getLocation(@Param('id') id: string) {
+      return this.svc.getLocation(id);
+   }
+
+   // ✅ UPDATE DRIVER LOCATION
+   @Patch(':id/location')
+   @UseGuards(JwtAuthGuard, RolesGuard)
+   @Roles('TRANSPORTER', 'LAST_MILE_PROVIDER')
+   @ApiBearerAuth('access-token')
+   @ApiParam({ name: 'id', description: 'Shipment ID' })
+   @ApiOperation({
+      summary: "Update driver's current location",
+      description: "Called by the driver's app to update the shipment's real-time GPS coordinates for map tracking.",
+   })
+   async updateLocation(@Param('id') id: string, @Body() dto: UpdateLocationDto) {
+      return this.svc.updateCurrentLocation(id, dto.lat, dto.lng);
    }
 
    // ✅ DELETE SHIPMENT

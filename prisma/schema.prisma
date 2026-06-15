@@ -538,6 +538,14 @@ model Shipment {
   assignedRackId        String?
   assignedBinId         String?
 
+  // COORDINATES
+  pickupLat   Float?
+  pickupLng   Float?
+  deliveryLat Float?
+  deliveryLng Float?
+  currentLat  Float?
+  currentLng  Float?
+
   // TRACKING
   createdBy  String
   customerId String

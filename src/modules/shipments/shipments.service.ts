@@ -164,6 +164,10 @@ export class ShipmentsService {
                   totalCost,
                   status: ShipmentStatus.PENDING as any,
                   assignedTransporterId: dto.transporterId ?? null,
+                  pickupLat: dto.pickupLat ?? null,
+                  pickupLng: dto.pickupLng ?? null,
+                  deliveryLat: dto.deliveryLat ?? null,
+                  deliveryLng: dto.deliveryLng ?? null,
                   createdBy: userId,
                   customerId: userId,
                },
@@ -565,6 +569,36 @@ export class ShipmentsService {
          currentLocation: this.getCurrentLocation(shipment.status as ShipmentStatus),
          timeline: shipment.statusHistory.map((h: any) => ({ status: h.status, timestamp: h.timestamp, note: h.note })),
       };
+   }
+
+   async updateCurrentLocation(shipmentId: string, lat: number, lng: number) {
+      const shipment = await this.prisma.shipment.findUnique({ where: { id: shipmentId } });
+      if (!shipment) throw new NotFoundException('Shipment not found');
+
+      return this.prisma.shipment.update({
+         where: { id: shipmentId },
+         data: { currentLat: lat, currentLng: lng },
+         select: { id: true, currentLat: true, currentLng: true },
+      });
+   }
+
+   async getLocation(shipmentId: string) {
+      const shipment = await this.prisma.shipment.findUnique({
+         where: { id: shipmentId },
+         select: {
+            id: true,
+            orderId: true,
+            status: true,
+            pickupLat: true,
+            pickupLng: true,
+            deliveryLat: true,
+            deliveryLng: true,
+            currentLat: true,
+            currentLng: true,
+         },
+      });
+      if (!shipment) throw new NotFoundException('Shipment not found');
+      return shipment;
    }
 
    async update(shipmentId: string, dto: UpdateShipmentDto, userId: string): Promise<Shipment> {
