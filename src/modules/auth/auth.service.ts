@@ -12,7 +12,6 @@ import { ConfigService } from '@nestjs/config';
 import type { StorageService } from '../../common/storage/storage.interface';
 import { MailService } from '../../common/mail/mail.service';
 import { RegisterCompanyDto, RegisterKind } from './dto/register-company.dto';
-import { TwilioVerifyService } from './twilio-verify.service';
 
 @Injectable()
 export class AuthService {
@@ -77,7 +76,6 @@ export class AuthService {
       private readonly mailer: MailService,
       private readonly tokenService: TokenService,
       private readonly urlService: UrlService,
-      private readonly twilioVerify: TwilioVerifyService,
    ) {
       this.refreshDays = Number(this.cfg.get('REFRESH_EXPIRES_DAYS') ?? 30);
    }
@@ -153,7 +151,25 @@ export class AuthService {
                if (!phoneForVerification || !/^\+[1-9]\d{7,14}$/.test(phoneForVerification)) {
                   throw new BadRequestException('Phone number must be in international format, for example +2347065737817');
                }
-               await this.twilioVerify.sendSmsCode(phoneForVerification);
+               const tokenRec = await this.tokenService.createVerificationCode(existingUser.id);
+
+               const emailContext = {
+                  fullName: normalized.fullName ?? existingUser.email,
+                  businessName: normalized.businessName ?? '',
+                  verificationCode: tokenRec.token,
+                  phoneNumber: phoneForVerification,
+               };
+
+               try {
+                  await this.mailer.sendVerificationEmail(existingUser.email!, emailContext);
+               } catch (emailErr) {
+                  try {
+                     await this.tokenService.deleteVerificationTokensByUser(existingUser.id);
+                  } catch (e) {
+                     this.logger.error('Failed to cleanup token after code email send failure: ' + ((e as any)?.message ?? e));
+                  }
+                  throw new BadRequestException('Failed to send verification code. Please try again later.');
+               }
             } else {
                const tokenRec = await this.tokenService.createVerificationToken(existingUser.id);
                const verificationUrl = this.urlService.verificationUrl(tokenRec.token);
@@ -236,7 +252,16 @@ export class AuthService {
          const usesCodeVerification = this.usesCodeVerification(dto.kind);
          try {
             if (usesCodeVerification) {
-               await this.twilioVerify.sendSmsCode(user.phone!);
+               const tokenRec = await this.tokenService.createVerificationCode(user.id);
+
+               const emailContext = {
+                  fullName: normalized.fullName,
+                  businessName: normalized.businessName,
+                  verificationCode: tokenRec.token,
+                  phoneNumber: normalized.phoneNumber,
+               };
+
+               await this.mailer.sendVerificationEmail(user.email!, emailContext);
             } else {
                const tokenRec = await this.tokenService.createVerificationToken(user.id);
                const verificationUrl = this.urlService.verificationUrl(tokenRec.token);
@@ -268,7 +293,7 @@ export class AuthService {
             }
 
             const message = (verificationErr as any)?.response?.message || (verificationErr as any)?.message;
-            throw new BadRequestException(message || (usesCodeVerification ? 'Failed to send phone verification code. Please try again.' : 'Failed to send verification email. Please try again.'));
+            throw new BadRequestException(message || (usesCodeVerification ? 'Failed to send verification code. Please try again.' : 'Failed to send verification email. Please try again.'));
          }
 
          return {
@@ -304,44 +329,36 @@ export class AuthService {
 
       const normalizedEmail = this.cleanEmail(emailAddress);
       if (!normalizedEmail) throw new BadRequestException('Missing emailAddress');
-      const user = await this.prisma.user.findFirst({
-         where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
-         include: { company: true },
-      });
+      const rec = await this.tokenService.findVerificationTokenForEmail(normalizedEmail, verificationCode);
 
-      if (!user) {
+      if (!rec || rec.expiresAt < new Date()) {
          throw new BadRequestException('Invalid or expired verification code');
       }
 
-      if (!this.usesCodeVerification(user.kind)) {
+      if (!this.usesCodeVerification(rec.user?.kind)) {
          throw new BadRequestException('Verification code is only supported for enterprise and individual accounts');
       }
 
-      if (!user.phone) {
+      if (!rec.user?.phone) {
          throw new BadRequestException('Phone number is required for verification');
       }
 
-      const isApproved = await this.twilioVerify.checkSmsCode(user.phone, verificationCode);
-      if (!isApproved) {
-         throw new BadRequestException('Invalid or expired verification code');
-      }
-
-      await this.tokenService.deleteVerificationTokensByUser(user.id);
-      const emailToken = await this.tokenService.createVerificationToken(user.id);
+      await this.prisma.verificationToken.delete({ where: { id: rec.id } });
+      const emailToken = await this.tokenService.createVerificationToken(rec.user.id);
       const verificationUrl = this.urlService.verificationUrl(emailToken.token);
 
       const emailContext = {
-         fullName: user.company?.fullName ?? user.email,
-         businessName: user.company?.businessName ?? '',
+         fullName: rec.user.email,
+         businessName: '',
          verificationUrl,
-         phoneNumber: user.phone,
+         phoneNumber: rec.user.phone,
       };
 
       try {
-         await this.mailer.sendVerificationEmail(user.email!, emailContext);
+         await this.mailer.sendVerificationEmail(rec.user.email!, emailContext);
       } catch (emailErr) {
          try {
-            await this.tokenService.deleteVerificationTokensByUser(user.id);
+            await this.tokenService.deleteVerificationTokensByUser(rec.user.id);
          } catch (cleanupErr) {
             this.logger.error('Failed to cleanup token after phone OTP email send failure: ' + ((cleanupErr as any)?.message ?? String(cleanupErr)));
          }
@@ -351,9 +368,9 @@ export class AuthService {
       return {
          ok: true,
          message: 'Phone number verified. Verification email sent.',
-         email: user.email ?? null,
-         phone: user.phone ?? null,
-         companyId: user.companyId ?? null,
+         email: rec.user.email ?? null,
+         phone: rec.user.phone ?? null,
+         companyId: rec.user.companyId ?? null,
          expiresAt: emailToken.expiresAt,
       };
    }

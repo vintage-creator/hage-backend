@@ -10,7 +10,6 @@ import { CloudinaryService } from '../../common/storage/cloudinary.service';
 import { MailService } from '../../common/mail/mail.service';
 import TokenService from './token.service';
 import UrlService from './url.service';
-import { TwilioVerifyService } from './twilio-verify.service';
 import { VerifyController } from './verify.controller';
 import { ResetController } from './reset.controller';
 
@@ -29,7 +28,7 @@ import { ResetController } from './reset.controller';
       PrismaModule,
    ],
    controllers: [AuthController, VerifyController, ResetController],
-   providers: [AuthService, JwtStrategy, MailService, TokenService, UrlService, TwilioVerifyService, { provide: 'StorageService', useClass: CloudinaryService }],
+   providers: [AuthService, JwtStrategy, MailService, TokenService, UrlService, { provide: 'StorageService', useClass: CloudinaryService }],
    exports: [AuthService, TokenService, UrlService],
 })
 export class AuthModule {}
