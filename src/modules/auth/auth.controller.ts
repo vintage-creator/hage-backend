@@ -98,7 +98,7 @@ export class AuthController {
    @Post('register-individual')
    @ApiOperation({
       summary: 'Register individual user',
-      description: 'No document upload is required. The user receives a 4 digit verification code by SMS.',
+      description: 'No document upload is required. The backend generates a 4 digit phone verification code for this user. The code is currently delivered by the configured messaging provider.',
    })
    @ApiConsumes('multipart/form-data')
    @ApiBody({ schema: individualRegistrationSchema })
@@ -114,7 +114,7 @@ export class AuthController {
    @Post('register-enterprise')
    @ApiOperation({
       summary: 'Register enterprise user',
-      description: 'No document upload is required. The company phone number receives a 4 digit verification code by SMS.',
+      description: 'No document upload is required. The backend generates a 4 digit phone verification code for the company phone number. The code is currently delivered by the configured messaging provider.',
    })
    @ApiConsumes('multipart/form-data')
    @ApiBody({ schema: enterpriseRegistrationSchema })
@@ -179,6 +179,8 @@ export class AuthController {
    @Post('verify-phone-code')
    @ApiOperation({
       summary: 'Verify enterprise or individual onboarding code',
+      description:
+         'Verifies the backend-generated 4 digit phone OTP for individual or enterprise onboarding. emailAddress identifies the onboarding account; verificationCode is the locally stored OTP. After the phone code is verified, the backend sends the email verification link used before set-password.',
    })
    @ApiResponse({
       status: 200,
