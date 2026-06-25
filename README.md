@@ -71,6 +71,26 @@ cp .env.example .env
 Update your .env with database credentials and JWT secrets.
 ```
 
+#### Environment variables (required)
+
+These are the main runtime variables used by the API (locally and in App Runner):
+
+- **Core**: `NODE_ENV`, `PORT`
+- **Database**: `DATABASE_URL`
+- **Auth**: `JWT_SECRET`, `JWT_EXPIRES_IN`, `REFRESH_EXPIRES_DAYS`
+- **URLs/branding**: `APP_NAME`, `APP_URL`, `FRONTEND_URL`, `API_PREFIX`, `APP_LOGO`
+- **Email** (Mailtrap SMTP via `MailService` / nodemailer): `MAIL_HOST`, `MAIL_PORT`, `MAIL_USER`, `MAIL_PASS`, `MAIL_FROM`
+- **Storage**: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
+- **App Runner startup controls**: `ENABLE_SEEDING`, `FORCE`
+
+#### GitHub Actions / App Runner deployment variables
+
+The deploy workflow uses GitHub Actions secrets/variables:
+
+- **Secrets**: `AWS_ACCOUNT_ID`
+- **Variables**: `AWS_REGION`, `APP_URL_DEV`, `APP_URL_PROD`, `FRONTEND_URL_DEV`, `FRONTEND_URL_PROD`, `ENABLE_PROD_SEEDING` (optional)
+- **Mail (plain env on App Runner from GitHub `vars`)**: use either **`MAIL_*_DEV` / `MAIL_*_PROD`** or shared **`MAIL_HOST`**, **`MAIL_PORT`**, **`MAIL_FROM`**, **`MAIL_USER`**, **`MAIL_PASS`** (workflow falls back: e.g. `MAIL_USER_DEV` → `MAIL_USER`). `MAIL_PORT` defaults to `2525` in the workflow if unset.
+
 ### 4. Setup Database
 
 ```bash

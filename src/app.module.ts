@@ -16,6 +16,7 @@ import { TransporterRatingModule } from './modules/transporter-rating/transporte
 import { PaymentModule } from './modules/payment/payment.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { CommunicationsModule } from './modules/communications/communications.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
    imports: [
@@ -34,6 +35,7 @@ import { CommunicationsModule } from './modules/communications/communications.mo
       PaymentModule,
       ReportsModule,
       CommunicationsModule,
+      HealthModule,
    ],
    controllers: [],
    providers: [],
