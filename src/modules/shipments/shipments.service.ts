@@ -534,6 +534,208 @@ export class ShipmentsService {
       return { totalShipments: total, byStatus: { pending, accepted, inWarehouse, inTransit, completed, cancelled } };
    }
 
+   private locationLabel(location: any) {
+      const loc = this.safeParseLocation(location);
+      if (!loc) return null;
+      if (typeof loc === 'string') return loc;
+      return loc.address || loc.state || loc.region || loc.country || null;
+   }
+
+   private mapPoint(lat?: number | null, lng?: number | null) {
+      return lat !== null && lat !== undefined && lng !== null && lng !== undefined ? { lat, lng } : null;
+   }
+
+   private timeAgo(date?: Date | string | null) {
+      if (!date) return null;
+      const then = new Date(date).getTime();
+      const diffMs = Date.now() - then;
+      const minutes = Math.max(0, Math.floor(diffMs / 60000));
+      if (minutes < 1) return 'Just now';
+      if (minutes < 60) return `${minutes} min${minutes === 1 ? '' : 's'} ago`;
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+      const days = Math.floor(hours / 24);
+      return `${days} day${days === 1 ? '' : 's'} ago`;
+   }
+
+   private timelineCopy(status: string) {
+      const copy: Record<string, { title: string; description: string }> = {
+         PENDING: { title: 'Shipment Created', description: 'Your shipment has been created and is awaiting assignment' },
+         ACCEPTED: { title: 'Assigned for Delivery', description: 'A transporter has been assigned to your package' },
+         IN_WAREHOUSE: { title: 'In Warehouse', description: 'Your package is being processed at the warehouse' },
+         IN_TRANSIT: { title: 'On the Way', description: 'Transporter is on the way to your location' },
+         PICKED_UP: { title: 'Picked Up', description: 'A rider has collected your package' },
+         DELIVERED: { title: 'Delivered', description: 'Package has been delivered to you' },
+         COMPLETED: { title: 'Completed', description: 'Shipment has been completed' },
+         CANCELLED: { title: 'Cancelled', description: 'Shipment was cancelled' },
+      };
+      return copy[status] ?? { title: status, description: 'Shipment status updated' };
+   }
+
+   private customsStatus(shipment: any) {
+      if (shipment.shipmentType !== 'CROSS_BORDER') return null;
+      if (['DELIVERED', 'COMPLETED'].includes(shipment.status)) {
+         return {
+            status: 'CLEARED',
+            message: 'Your package has been cleared for delivery',
+         };
+      }
+      return {
+         status: 'PENDING',
+         message: 'Customs clearance is pending',
+      };
+   }
+
+   private routeSummary(shipment: any) {
+      return {
+         from: this.locationLabel(shipment.origin),
+         to: this.locationLabel(shipment.destination),
+      };
+   }
+
+   private customerShipmentWhere(userId: string) {
+      return { OR: [{ createdBy: userId }, { customerId: userId }] };
+   }
+
+   private async ensureCustomerShipmentAccess(shipmentId: string, userId: string) {
+      const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { kind: true } });
+      if (!user || !['ENTERPRISE', 'INDIVIDUAL'].includes(user.kind)) {
+         throw new ForbiddenException('Only enterprise and individual users can access this shipment view');
+      }
+
+      const shipment = await this.prisma.shipment.findFirst({
+         where: { id: shipmentId, ...this.customerShipmentWhere(userId) },
+         include: {
+            transporter: { select: { id: true, email: true, phone: true, kind: true, company: { select: { fullName: true, businessName: true } } } },
+            statusHistory: { orderBy: { timestamp: 'asc' } },
+            events: { orderBy: { timestamp: 'asc' } },
+         } as any,
+      } as any);
+
+      if (!shipment) throw new NotFoundException('Shipment not found');
+      return shipment as any;
+   }
+
+   async getCustomerShipmentOverview(userId: string) {
+      const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { kind: true } });
+      if (!user || !['ENTERPRISE', 'INDIVIDUAL'].includes(user.kind)) {
+         throw new ForbiddenException('Only enterprise and individual users can access this shipment view');
+      }
+
+      const baseWhere = this.customerShipmentWhere(userId);
+      const include = {
+         transporter: { select: { id: true, email: true, phone: true, kind: true, company: { select: { fullName: true, businessName: true } } } },
+      };
+
+      const [active, settled] = await Promise.all([
+         this.prisma.shipment.findMany({
+            where: { ...baseWhere, status: { in: [ShipmentStatus.PENDING, ShipmentStatus.ACCEPTED, ShipmentStatus.IN_WAREHOUSE, ShipmentStatus.IN_TRANSIT, ShipmentStatus.PICKED_UP] as any } },
+            orderBy: { updatedAt: 'desc' },
+            include,
+         }),
+         this.prisma.shipment.findMany({
+            where: { ...baseWhere, status: { in: [ShipmentStatus.DELIVERED, ShipmentStatus.COMPLETED, ShipmentStatus.CANCELLED] as any } },
+            orderBy: { updatedAt: 'desc' },
+            include,
+         }),
+      ]);
+
+      const mapListItem = (shipment: any) => ({
+         id: shipment.id,
+         shipmentId: shipment.orderId,
+         item: shipment.nameOfItem ?? shipment.cargoType,
+         status: shipment.status,
+         route: this.routeSummary(shipment),
+      });
+
+      return {
+         activeShipments: active.map(mapListItem),
+         settledShipments: settled.map((shipment: any) => ({
+            ...mapListItem(shipment),
+            customStatus: this.customsStatus(shipment),
+            deliveryDate: shipment.deliveryDate,
+            viewDetailsUrl: `/api/shipments/customer/${shipment.id}/details`,
+            review: shipment.assignedTransporterId
+               ? {
+                    transporterId: shipment.assignedTransporterId,
+                    endpoint: `/api/transporters/${shipment.assignedTransporterId}/ratings`,
+                    maxStars: 5,
+                 }
+               : null,
+         })),
+      };
+   }
+
+   async getCustomerShipmentDetails(shipmentId: string, userId: string) {
+      const shipment = await this.ensureCustomerShipmentAccess(shipmentId, userId);
+      const transporterName = shipment.transporter?.company?.businessName || shipment.transporter?.company?.fullName || shipment.transporter?.email || null;
+
+      return {
+         id: shipment.id,
+         shipmentId: shipment.orderId,
+         item: shipment.nameOfItem ?? shipment.cargoType,
+         status: shipment.status,
+         route: this.routeSummary(shipment),
+         packageInformation: {
+            shipmentId: shipment.orderId,
+            deliveryType: shipment.serviceType,
+            shipmentType: shipment.shipmentType,
+            estimatedDelivery: shipment.deliveryDate,
+            transporter: shipment.transporter
+               ? {
+                    id: shipment.transporter.id,
+                    name: transporterName,
+                    email: shipment.transporter.email,
+                    phone: shipment.transporter.phone,
+                    inAppCall: {
+                       contextEndpoint: `/api/communications/shipments/${shipment.id}`,
+                       startCallEndpoint: `/api/communications/shipments/${shipment.id}/calls`,
+                    },
+                 }
+               : null,
+         },
+         map: {
+            pickup: this.mapPoint(shipment.pickupLat, shipment.pickupLng),
+            delivery: this.mapPoint(shipment.deliveryLat, shipment.deliveryLng),
+            current: this.mapPoint(shipment.currentLat, shipment.currentLng),
+            googleMapsApiKeyRequired: true,
+         },
+         trackingDetails: [
+            ...shipment.statusHistory.map((history: any) => {
+               const copy = this.timelineCopy(history.status);
+               return {
+                  status: history.status,
+                  title: copy.title,
+                  description: history.note ?? copy.description,
+                  timestamp: history.timestamp,
+                  timeAgo: this.timeAgo(history.timestamp),
+               };
+            }),
+            ...shipment.events.map((event: any) => ({
+               status: event.status,
+               title: event.status,
+               description: event.note,
+               location: event.location,
+               timestamp: event.timestamp,
+               timeAgo: this.timeAgo(event.timestamp),
+            })),
+         ].sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()),
+         settledDetails: ['DELIVERED', 'COMPLETED', 'CANCELLED'].includes(shipment.status)
+            ? {
+                 deliveryDate: shipment.deliveryDate,
+                 customsStatus: this.customsStatus(shipment),
+                 review: shipment.assignedTransporterId
+                    ? {
+                         transporterId: shipment.assignedTransporterId,
+                         endpoint: `/api/transporters/${shipment.assignedTransporterId}/ratings`,
+                         maxStars: 5,
+                      }
+                    : null,
+              }
+            : null,
+      };
+   }
+
    async findOne(shipmentId: string, userId: string): Promise<Shipment> {
       const shipment = await this.prisma.shipment.findUnique({
          where: { id: shipmentId },

@@ -6,9 +6,10 @@ import { ConfigService } from '@nestjs/config';
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
    constructor(cfg: ConfigService) {
+      const sessionsNeverExpire = ['never', 'none', 'false', '0'].includes((cfg.get<string>('JWT_EXPIRES_IN') ?? '').trim().toLowerCase());
       super({
          jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-         ignoreExpiration: false,
+         ignoreExpiration: sessionsNeverExpire,
          secretOrKey: cfg.get<string>('JWT_SECRET') || 'unsafe-dev-secret',
       });
    }

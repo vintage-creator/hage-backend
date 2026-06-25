@@ -317,6 +317,31 @@ export class ShipmentsController {
       return this.svc.getDashboardAnalytics(userId);
    }
 
+   @Get('customer/overview')
+   @UseGuards(JwtAuthGuard)
+   @ApiBearerAuth('access-token')
+   @ApiOperation({
+      summary: 'Get enterprise/end-user shipment overview',
+      description: 'Returns active and settled shipment sections for enterprise and individual users.',
+   })
+   getCustomerShipmentOverview(@Req() req: Request) {
+      const userId = (req.user as any)?.id || (req.user as any)?.sub;
+      return this.svc.getCustomerShipmentOverview(userId);
+   }
+
+   @Get('customer/:id/details')
+   @UseGuards(JwtAuthGuard)
+   @ApiBearerAuth('access-token')
+   @ApiParam({ name: 'id', description: 'Shipment ID' })
+   @ApiOperation({
+      summary: 'Get enterprise/end-user shipment detail',
+      description: 'Returns package information, live map coordinates, transporter contact/call metadata, timeline, settled shipment details, customs status, and review metadata.',
+   })
+   getCustomerShipmentDetails(@Param('id') id: string, @Req() req: Request) {
+      const userId = (req.user as any)?.id || (req.user as any)?.sub;
+      return this.svc.getCustomerShipmentDetails(id, userId);
+   }
+
    // ✅ GET SHIPMENT BY ID
    @Get(':id')
    // @UseGuards(JwtAuthGuard)

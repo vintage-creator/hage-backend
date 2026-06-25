@@ -453,8 +453,9 @@ export class AuthService {
 
    private signAccessToken(payload: any) {
       const secret = this.cfg.get('JWT_SECRET');
-      const expiresIn = this.cfg.get('JWT_EXPIRES_IN') ?? '30m';
-      return this.jwt.sign(payload, { secret, expiresIn });
+      const expiresIn = this.cfg.get<string>('JWT_EXPIRES_IN');
+      const sessionsNeverExpire = ['never', 'none', 'false', '0'].includes((expiresIn ?? '').trim().toLowerCase());
+      return sessionsNeverExpire ? this.jwt.sign(payload, { secret }) : this.jwt.sign(payload, { secret, expiresIn: (expiresIn ?? '30m') as any });
    }
 
    private createRefreshTokenRaw() {
@@ -537,7 +538,9 @@ export class AuthService {
          },
       });
 
-      if (!stored || stored.expiresAt < new Date()) {
+      const refreshTokensNeverExpire = ['never', 'none', 'false', '0'].includes((this.cfg.get<string>('JWT_EXPIRES_IN') ?? '').trim().toLowerCase());
+
+      if (!stored || (!refreshTokensNeverExpire && stored.expiresAt < new Date())) {
          if (stored) {
             await this.prisma.refreshToken.delete({ where: { id: stored.id } });
          }

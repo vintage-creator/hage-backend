@@ -22,7 +22,7 @@ import { ResetController } from './reset.controller';
          inject: [ConfigService],
          useFactory: (cfg: ConfigService): JwtModuleOptions => ({
             secret: cfg.get<string>('JWT_SECRET') ?? 'unsafe-dev-secret',
-            signOptions: { expiresIn: (cfg.get<string>('JWT_EXPIRES_IN') ?? '1h') as any },
+            signOptions: ['never', 'none', 'false', '0'].includes((cfg.get<string>('JWT_EXPIRES_IN') ?? '').trim().toLowerCase()) ? {} : { expiresIn: (cfg.get<string>('JWT_EXPIRES_IN') ?? '1h') as any },
          }),
       }),
       PrismaModule,
