@@ -316,7 +316,7 @@ jobs:
                 "Port": "3000",
                 "RuntimeEnvironmentVariables": {
                   "NODE_ENV": "$ENVIRONMENT",
-                  "JWT_EXPIRES_IN": "15m",
+                  "JWT_EXPIRES_IN": "never",
                   "REFRESH_EXPIRES_DAYS": "30",
                   "MAIL_HOST": "${{ vars.MAIL_HOST_DEV || vars.MAIL_HOST }}",
                   "MAIL_PORT": "${{ vars.MAIL_PORT_DEV || vars.MAIL_PORT || '2525' }}",
@@ -594,7 +594,7 @@ jobs:
                 "Port": "3000",
                 "RuntimeEnvironmentVariables": {
                   "NODE_ENV": "$ENVIRONMENT",
-                  "JWT_EXPIRES_IN": "15m",
+                  "JWT_EXPIRES_IN": "never",
                   "REFRESH_EXPIRES_DAYS": "30",
                   "MAIL_HOST": "${{ vars.MAIL_HOST_PROD || vars.MAIL_HOST }}",
                   "MAIL_PORT": "${{ vars.MAIL_PORT_PROD || vars.MAIL_PORT || '2525' }}",
@@ -765,7 +765,7 @@ jobs:
                 "Port": "3000",
                 "RuntimeEnvironmentVariables": {
                   "NODE_ENV": "$ENVIRONMENT",
-                  "JWT_EXPIRES_IN": "15m",
+                  "JWT_EXPIRES_IN": "never",
                   "REFRESH_EXPIRES_DAYS": "30",
                   "MAIL_HOST": "${{ vars.MAIL_HOST_DEV || vars.MAIL_HOST }}",
                   "MAIL_PORT": "${{ vars.MAIL_PORT_DEV || vars.MAIL_PORT || '2525' }}",
@@ -925,7 +925,7 @@ jobs:
                 "Port": "3000",
                 "RuntimeEnvironmentVariables": {
                   "NODE_ENV": "$ENVIRONMENT",
-                  "JWT_EXPIRES_IN": "15m",
+                  "JWT_EXPIRES_IN": "never",
                   "REFRESH_EXPIRES_DAYS": "30",
                   "MAIL_HOST": "${{ vars.MAIL_HOST_PROD || vars.MAIL_HOST }}",
                   "MAIL_PORT": "${{ vars.MAIL_PORT_PROD || vars.MAIL_PORT || '2525' }}",

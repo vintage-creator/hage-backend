@@ -50,6 +50,7 @@ test-results/
 openapi.json
 clients/
 .generated/
+.claude/
 
 # Misc
 .vault/           # for secret stores if any
