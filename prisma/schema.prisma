@@ -24,6 +24,12 @@ enum CompanyRole {
 enum DocType {
   COMPANY_REGISTRATION_CERTIFICATE
   TAX_REGISTRATION_CERTIFICATE
+  UTILITY_BILL
+  GOVERNMENT_ISSUED_ID
+  PASSPORT_PHOTOGRAPH
+  VEHICLE_REGISTRATION_CERTIFICATE
+  VEHICLE_INSURANCE
+  CAC_REGISTRATION_CERTIFICATE
 }
 
 enum WarehouseStatus {
@@ -166,6 +172,11 @@ model Company {
   country         String?
   language        String?
   role            CompanyRole?
+  city            String?
+  openingHoursStart String?
+  openingHoursEnd   String?
+  vehicleType     String?
+  businessNumber  String?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
