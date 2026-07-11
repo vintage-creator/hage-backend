@@ -23,6 +23,9 @@ enum DocumentType {
 // Platform fee rate (2.5%)
 const TRANSACTION_FEE_RATE = 0.025;
 
+// Share of the shipment total cost credited to a LAST_MILE_DELIVERY driver's wallet on delivery
+const DRIVER_EARNING_RATE = 0.8;
+
 @Injectable()
 export class ShipmentsService {
    private readonly logger = new Logger(ShipmentsService.name);
@@ -304,6 +307,22 @@ export class ShipmentsService {
             include: { transporter: true, warehouse: true, documents: true },
          });
          await tx.shipmentStatusHistory.create({ data: { shipmentId, status: dto.status as any, updatedBy, note: dto.note } });
+
+         // Credit the assigned last-mile driver's wallet the first time a shipment is marked DELIVERED
+         if (dto.status === ShipmentStatus.DELIVERED && updatedShipment.assignedTransporterId && updatedShipment.transporter?.kind === 'LAST_MILE_DELIVERY') {
+            const existingEarning = await tx.driverEarning.findUnique({ where: { shipmentId } });
+            if (!existingEarning) {
+               const amount = Math.round(updatedShipment.totalCost * DRIVER_EARNING_RATE * 100) / 100;
+               await tx.driverEarning.create({
+                  data: { driverId: updatedShipment.assignedTransporterId, shipmentId, amount, status: 'AVAILABLE' },
+               });
+               await tx.user.update({
+                  where: { id: updatedShipment.assignedTransporterId },
+                  data: { walletBalance: { increment: amount }, totalEarnings: { increment: amount } },
+               });
+            }
+         }
+
          return updatedShipment;
       });
 

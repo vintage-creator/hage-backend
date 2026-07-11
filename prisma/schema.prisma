@@ -128,6 +128,19 @@ enum CardBrand {
   MASTERCARD
 }
 
+enum DriverEarningStatus {
+  PENDING
+  AVAILABLE
+  WITHDRAWN
+}
+
+enum WithdrawalStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 model User {
   id             String    @id @default(cuid())
   email          String?   @unique
@@ -140,6 +153,11 @@ model User {
   deactivatedAt  DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+
+  // LAST_MILE_DELIVERY driver fields
+  isAvailable   Boolean @default(false) // online/offline toggle on the driver dashboard
+  walletBalance Float   @default(0) // amount currently available to withdraw
+  totalEarnings Float   @default(0) // lifetime earnings (informational)
 
   company             Company?             @relation(fields: [companyId], references: [id])
   verificationTokens  VerificationToken[]
@@ -161,6 +179,8 @@ model User {
   ratingsGiven          TransporterRating[]     @relation("RatingsGiven")
   payments              Payment[]
   communicationMessages CommunicationMessage[]
+  driverEarnings        DriverEarning[]         @relation("DriverEarnings")
+  withdrawals           Withdrawal[]
 }
 
 model Company {
@@ -279,10 +299,12 @@ model PaymentMethod {
   accountNumberLast4 String?
   bankSortCode       String?
   currency           String?
+  isDefault          Boolean           @default(false) // default withdrawal account for LAST_MILE_DELIVERY drivers
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  withdrawals Withdrawal[]
 
   @@index([userId])
 }
@@ -580,6 +602,7 @@ model Shipment {
   bids                TransporterBid[]
   payment             Payment?
   communicationThread CommunicationThread?
+  driverEarning       DriverEarning?
 
   @@index([orderId])
   @@index([status])
@@ -765,5 +788,47 @@ model Payment {
 
   @@index([userId])
   @@index([reference])
+  @@index([status])
+}
+
+/**
+ * --- LAST_MILE_DELIVERY driver wallet ---
+ */
+model DriverEarning {
+  id         String              @id @default(cuid())
+  driverId   String
+  shipmentId String              @unique
+  amount     Float
+  status     DriverEarningStatus @default(AVAILABLE)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  driver   User     @relation("DriverEarnings", fields: [driverId], references: [id], onDelete: Cascade)
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([driverId])
+  @@index([status])
+}
+
+model Withdrawal {
+  id            String           @id @default(cuid())
+  userId        String
+  amount        Float
+  fee           Float            @default(0)
+  netAmount     Float
+  bankAccountId String?
+  bankName      String?
+  accountName   String?
+  accountNumberLast4 String?
+  status        WithdrawalStatus @default(PENDING)
+  reference     String           @unique
+  failureReason String?
+  createdAt     DateTime         @default(now())
+  processedAt   DateTime?
+
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankAccount PaymentMethod? @relation(fields: [bankAccountId], references: [id])
+
+  @@index([userId])
   @@index([status])
 }

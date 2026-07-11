@@ -16,6 +16,7 @@ import { TransporterRatingModule } from './modules/transporter-rating/transporte
 import { PaymentModule } from './modules/payment/payment.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { CommunicationsModule } from './modules/communications/communications.module';
+import { LastMileModule } from './modules/last-mile/last-mile.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -35,6 +36,7 @@ import { HealthModule } from './health/health.module';
       PaymentModule,
       ReportsModule,
       CommunicationsModule,
+      LastMileModule,
       HealthModule,
    ],
    controllers: [],
