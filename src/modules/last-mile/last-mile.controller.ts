@@ -1,5 +1,8 @@
-import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards, UseInterceptors, UploadedFile, BadRequestException, Req } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import * as path from 'path';
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiParam, ApiResponse, ApiTags, ApiBody } from '@nestjs/swagger';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -10,6 +13,23 @@ import { SetBankAccountDto } from './dto/set-bank-account.dto';
 import { WithdrawFundsDto } from './dto/withdraw-funds.dto';
 import { StatementQueryDto } from './dto/statement-query.dto';
 import { NavigationQueryDto } from './dto/navigation-query.dto';
+import { ListDeliveriesQueryDto } from './dto/list-deliveries-query.dto';
+import { CancelDeliveryDto } from './dto/cancel-delivery.dto';
+import { ConfirmCodeDto } from './dto/confirm-code.dto';
+
+type FileFilterCallback = (error: Error | null, acceptFile: boolean) => void;
+
+const imageFileFilter = (_req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
+   const ext = path.extname(file.originalname).toLowerCase();
+   const allowedExts = ['.jpg', '.jpeg', '.png', '.webp'];
+   const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+
+   if (allowedExts.includes(ext) && allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+   } else {
+      cb(new BadRequestException('Only JPEG, PNG, and WebP images are allowed'), false);
+   }
+};
 
 @ApiTags('last-mile-delivery')
 @Controller('last-mile')
@@ -61,6 +81,44 @@ export class LastMileController {
       return this.svc.setAvailability(this.userId(req), dto.isAvailable);
    }
 
+   // ─── DELIVERIES LIST (Images 1 & 2 — Total/Pending/Completed/Failed tabs) ─
+   @Get('deliveries')
+   @ApiOperation({
+      summary: 'List deliveries by tab (Total/Pending/Completed/Failed)',
+      description:
+         'Powers the "Deliveries / Metrics" screen. Filter by `filter` (all/pending/in_transit/completed/failed), search by ID or customer, and sort by distance (pass `lat`/`lng`) or ETA.',
+   })
+   @ApiResponse({
+      status: 200,
+      schema: {
+         example: {
+            page: 1,
+            limit: 20,
+            total: 3,
+            totalPages: 1,
+            items: [
+               {
+                  id: 'shp_123',
+                  orderId: 'SHP-2026-53678',
+                  status: 'IN_TRANSIT',
+                  eta: '2026-07-10T15:30:00.000Z',
+                  customerName: 'Alexander Hamil',
+                  customerPhone: '070 4345 7543',
+                  pickup: { address: '14, Biodun street, Lekki', lat: 6.4478, lng: 3.4721 },
+                  delivery: { address: '14, Biodun street, Lekki', lat: 6.4478, lng: 3.4721 },
+                  failureReason: null,
+                  canStart: false,
+                  canComplete: true,
+                  canRetry: false,
+               },
+            ],
+         },
+      },
+   })
+   listDeliveries(@Query() query: ListDeliveriesQueryDto, @Req() req: Request) {
+      return this.svc.listDeliveries(this.userId(req), query);
+   }
+
    // ─── CURRENT DELIVERY ───────────────────────────────────────────────────
    @Get('deliveries/current')
    @ApiOperation({
@@ -69,6 +127,79 @@ export class LastMileController {
    })
    getCurrentDelivery(@Req() req: Request) {
       return this.svc.getCurrentDelivery(this.userId(req));
+   }
+
+   // ─── START DELIVERY ─────────────────────────────────────────────────────
+   @Post('deliveries/:id/start')
+   @ApiParam({ name: 'id', description: 'Shipment ID' })
+   @ApiOperation({
+      summary: 'Start a pending delivery',
+      description: 'Powers the "Start Delivery" button on a Pending card — moves the delivery to In Transit and generates the customer\'s 4-digit delivery confirmation code.',
+   })
+   startDelivery(@Param('id') id: string, @Req() req: Request) {
+      return this.svc.startDelivery(this.userId(req), id);
+   }
+
+   // ─── CANCEL / FAIL DELIVERY ─────────────────────────────────────────────
+   @Post('deliveries/:id/cancel')
+   @ApiParam({ name: 'id', description: 'Shipment ID' })
+   @ApiOperation({
+      summary: 'Cancel / fail the current delivery',
+      description: 'Powers the red "Cancel Delivery" button — marks the delivery as Failed with a reason (e.g. "Rider denied entry"), shown on the "Failed deliveries" tab.',
+   })
+   cancelDelivery(@Param('id') id: string, @Body() dto: CancelDeliveryDto, @Req() req: Request) {
+      return this.svc.cancelDelivery(this.userId(req), id, dto);
+   }
+
+   // ─── RETRY TASK ──────────────────────────────────────────────────────────
+   @Post('deliveries/:id/retry')
+   @ApiParam({ name: 'id', description: 'Shipment ID' })
+   @ApiOperation({ summary: 'Retry a failed delivery', description: 'Powers the "Retry Task" button on a Failed card — moves the delivery back to In Transit.' })
+   retryDelivery(@Param('id') id: string, @Req() req: Request) {
+      return this.svc.retryDelivery(this.userId(req), id);
+   }
+
+   // ─── COMPLETED DELIVERY FLOW (Image 3) ──────────────────────────────────
+   @Post('deliveries/:id/proof-photo')
+   @ApiParam({ name: 'id', description: 'Shipment ID' })
+   @ApiOperation({ summary: 'Upload proof-of-delivery photo', description: 'Powers the "Take Photo" step.' })
+   @ApiConsumes('multipart/form-data')
+   @ApiBody({
+      schema: {
+         type: 'object',
+         properties: { photo: { type: 'string', format: 'binary', description: 'Proof-of-delivery photo (JPEG, PNG, or WebP, max 5MB)' } },
+         required: ['photo'],
+      },
+   })
+   @UseInterceptors(FileInterceptor('photo', { storage: memoryStorage(), fileFilter: imageFileFilter, limits: { fileSize: 5 * 1024 * 1024 } }))
+   uploadProofPhoto(@Param('id') id: string, @UploadedFile() file: Express.Multer.File, @Req() req: Request) {
+      return this.svc.uploadProofPhoto(this.userId(req), id, file);
+   }
+
+   @Post('deliveries/:id/confirm-code')
+   @ApiParam({ name: 'id', description: 'Shipment ID' })
+   @ApiOperation({ summary: 'Confirm the delivery code', description: 'Powers the "Confirm Code" step — validates the 4-digit code against the one generated when the delivery started.' })
+   confirmCode(@Param('id') id: string, @Body() dto: ConfirmCodeDto, @Req() req: Request) {
+      return this.svc.confirmCode(this.userId(req), id, dto);
+   }
+
+   @Post('deliveries/:id/signature')
+   @ApiParam({ name: 'id', description: 'Shipment ID' })
+   @ApiOperation({
+      summary: 'Submit customer signature and complete the delivery',
+      description: 'Powers the "Signature" step. Requires the proof photo and code to already be confirmed. Marks the shipment Delivered, credits the driver\'s wallet, and returns the "Delivery Completed!" payload.',
+   })
+   @ApiConsumes('multipart/form-data')
+   @ApiBody({
+      schema: {
+         type: 'object',
+         properties: { signature: { type: 'string', format: 'binary', description: 'Signature image captured on the signature pad' } },
+         required: ['signature'],
+      },
+   })
+   @UseInterceptors(FileInterceptor('signature', { storage: memoryStorage(), fileFilter: imageFileFilter, limits: { fileSize: 5 * 1024 * 1024 } }))
+   submitSignature(@Param('id') id: string, @UploadedFile() file: Express.Multer.File, @Req() req: Request) {
+      return this.svc.submitSignature(this.userId(req), id, file);
    }
 
    // ─── NAVIGATION (Image 3) ───────────────────────────────────────────────
@@ -99,6 +230,17 @@ export class LastMileController {
    })
    getNavigation(@Param('id') id: string, @Query() query: NavigationQueryDto, @Req() req: Request) {
       return this.svc.getNavigation(this.userId(req), id, query);
+   }
+
+   // ─── DELIVERY DETAIL (Image 2 "Delivery detail" screen) ─────────────────
+   @Get('deliveries/:id')
+   @ApiParam({ name: 'id', description: 'Shipment ID' })
+   @ApiOperation({
+      summary: 'Get full delivery detail',
+      description: 'Returns the same fields as the list, plus proof-of-delivery (photo/code/signature) and failure detail for the "View Details" screen.',
+   })
+   getDeliveryDetail(@Param('id') id: string, @Req() req: Request) {
+      return this.svc.getDeliveryDetail(this.userId(req), id);
    }
 
    // ─── WALLET (Image 2) ───────────────────────────────────────────────────

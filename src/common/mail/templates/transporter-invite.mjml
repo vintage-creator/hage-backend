@@ -1,0 +1,63 @@
+<mjml>
+  <mj-head>
+    <mj-attributes>
+      <mj-all font-family="Helvetica, Arial, sans-serif" />
+      <mj-class name="preheader" color="#9AA0A6" font-size="12px" />
+      <mj-class name="btn" background-color="#22C55E" color="#ffffff" border-radius="6px" padding="12px 24px" />
+    </mj-attributes>
+
+    <mj-style inline="inline">
+      .logo-img { border-radius: 6px; display: block; }
+    </mj-style>
+
+    <mj-preview>You've been added as a transporter on Hage</mj-preview>
+  </mj-head>
+
+  <mj-body background-color="#F5F7FA">
+    <mj-section background-color="#050301" padding="14px 24px" text-align="center">
+      <mj-column vertical-align="middle" padding="0">
+        <mj-image css-class="logo-img" width="80px" src="{{logoUrl}}" alt="{{appName}}" padding="6px 8px" />
+      </mj-column>
+    </mj-section>
+
+    <mj-section background-color="#ffffff" padding="24px" border-radius="8px" css-class="card">
+      <mj-column>
+        <mj-text font-size="20px" font-weight="700" color="#111827">
+          Hi {{transporterName}},
+        </mj-text>
+
+        <mj-text font-size="16px" color="#374151" padding-top="8px" line-height="1.4">
+          {{inviterName}} has added you as a transporter on {{appName}}.
+          {{#if alreadyRegistered}}
+          Your existing transporter account has been linked, so shipment requests from {{inviterName}} will now show up on your dashboard for you to accept or reject.
+          {{else}}
+          To start receiving and accepting shipment requests from {{inviterName}}, create your transporter account below.
+          {{/if}}
+        </mj-text>
+
+        {{#unless alreadyRegistered}}
+        <mj-button mj-class="btn" href="{{signupUrl}}" target="_blank" padding-top="18px">
+          Create your transporter account
+        </mj-button>
+        {{/unless}}
+
+        <mj-divider border-color="#E5E7EB" padding="20px 0" />
+
+        <mj-text font-size="13px" color="#6B7280">
+          If you weren't expecting this, you can safely ignore this email.
+        </mj-text>
+
+        <mj-spacer height="8px" />
+        <mj-text font-size="12px" color="#9CA3AF">© {{year}} {{appName}}. All rights reserved.</mj-text>
+      </mj-column>
+    </mj-section>
+
+    <mj-section padding="20px 0">
+      <mj-column>
+        <mj-text font-size="12px" color="#9CA3AF" align="center">
+          {{supportText}}
+        </mj-text>
+      </mj-column>
+    </mj-section>
+  </mj-body>
+</mjml>

@@ -542,6 +542,7 @@ export class AuthService {
          sub: user.id,
          email: user.email,
          kind: user.kind,
+         role: user.company?.role ?? null,
       };
 
       const accessToken = this.signAccessToken(payload);
@@ -615,6 +616,7 @@ export class AuthService {
          sub: user.id,
          email: user.email,
          kind: user.kind,
+         role: user.company?.role ?? null,
       };
 
       const accessToken = this.signAccessToken(payload);
@@ -682,6 +684,7 @@ export class AuthService {
          sub: stored.user.id,
          email: stored.user.email,
          kind: stored.user.kind,
+         role: stored.user.company?.role ?? null,
       };
 
       const accessToken = this.signAccessToken(payload);
@@ -895,6 +898,7 @@ export class AuthService {
          sub: user.id,
          email: user.email,
          kind: user.kind,
+         role: user.company?.role ?? null,
       };
 
       const accessToken = this.signAccessToken(payload);

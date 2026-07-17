@@ -184,6 +184,11 @@ export class MailService {
       return this.sendFromTemplate(email, subject, 'shipment-status-update', context);
    }
 
+   async sendTransporterInvite(email: string, context: any) {
+      const subject = context.alreadyRegistered ? `${this.cfg.get('APP_NAME')}: You've been added as a transporter` : `${this.cfg.get('APP_NAME')}: You're invited to join as a transporter`;
+      return this.sendFromTemplate(email, subject, 'transporter-invite', context);
+   }
+
    async sendWaitlistAdminNotification(to: string, context: any) {
       const subject = `${this.cfg.get('APP_NAME')}: New Marketplace Waitlist Entry`;
       return this.sendFromTemplate(to, subject, 'join-waitlist', context);
