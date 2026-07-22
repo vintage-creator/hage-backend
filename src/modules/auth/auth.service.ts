@@ -431,6 +431,9 @@ export class AuthService {
    }
 
    async verifyEmail(token: string) {
+      if (!token || typeof token !== 'string') {
+         throw new BadRequestException('Invalid or missing token');
+      }
       const rec = await this.tokenService.findVerificationToken(token);
 
       if (!rec || rec.expiresAt < new Date()) {
@@ -500,7 +503,7 @@ export class AuthService {
    }
 
    async verifyResetToken(token: string) {
-      if (!token) throw new BadRequestException('Missing token');
+      if (!token || typeof token !== 'string') throw new BadRequestException('Invalid or missing token');
 
       const rec = await this.tokenService.findPasswordResetToken(token);
       if (!rec || rec.used || rec.expiresAt < new Date()) {
@@ -514,8 +517,11 @@ export class AuthService {
       };
    }
 
-   async setPassword(verificationToken: string, password: string, retype: string) {
-      if (password !== retype) throw new BadRequestException('Passwords do not match');
+    async setPassword(verificationToken: string, password: string, retype: string) {
+       if (!verificationToken || typeof verificationToken !== 'string') {
+          throw new BadRequestException('Invalid or missing verification token');
+       }
+       if (password !== retype) throw new BadRequestException('Passwords do not match');
       if (!isStrongPassword(password)) throw new BadRequestException('Password is not strong enough');
       if (/^\d{4}$/.test(verificationToken)) {
          throw new BadRequestException('Verify the code before setting a password');
@@ -854,6 +860,9 @@ export class AuthService {
    }
 
    async resetPassword(token: string, password: string, retype: string) {
+      if (!token || typeof token !== 'string') {
+         throw new BadRequestException('Invalid or missing token');
+      }
       if (password !== retype) throw new BadRequestException('Passwords do not match');
       if (!isStrongPassword(password)) throw new BadRequestException('Password is not strong enough');
 
@@ -929,5 +938,13 @@ export class AuthService {
             company: user.company ? { id: user.company.id, businessName: user.company.businessName } : null,
          },
       };
+   }
+
+   decodeToken(token: string): any {
+      try {
+         return this.jwt.decode(token);
+      } catch {
+         return null;
+      }
    }
 }

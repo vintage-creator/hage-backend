@@ -1,4 +1,4 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { memoryStorage } from 'multer';
 import * as path from 'path';
 import { Body, Controller, Req, Res, Post, UploadedFiles, UseInterceptors, BadRequestException, HttpCode, UseGuards, HttpStatus } from '@nestjs/common';
@@ -344,14 +344,22 @@ export class AuthController {
    }
 
    @Post('logout')
-   @UseGuards(JwtAuthGuard)
    @ApiBearerAuth('access-token')
    @HttpCode(HttpStatus.NO_CONTENT)
    @ApiOperation({ summary: 'Logout and revoke refresh token' })
    @ApiResponse({ status: 204, description: 'Logged out (idempotent)' })
    async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() dto: LogoutDto): Promise<void> {
-      const user = (req as any).user;
-      const userId = user?.sub ?? null;
+      let userId: string | null = null;
+      const authHeader = req.headers['authorization'];
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+         try {
+            const token = authHeader.substring(7);
+            const decoded = this.auth.decodeToken(token);
+            userId = decoded?.sub ?? null;
+         } catch (e) {
+            // Ignore token decode error for logout resiliency
+         }
+      }
 
       await this.auth.logout({
          userId,
