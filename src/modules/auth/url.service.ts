@@ -17,7 +17,8 @@ export class UrlService {
 
    build(path: string, token?: string) {
       const base = this.normalizeBase();
-      const prefix = this.normalizePrefix();
+      const isExcluded = ['verify-email', 'reset-password'].includes(path);
+      const prefix = isExcluded ? '' : this.normalizePrefix();
       const p = path.startsWith('/') ? path.slice(1) : path;
       const q = token ? `?token=${encodeURIComponent(token)}` : '';
       return `${base}${prefix}/${p}${q}`;
