@@ -1,35 +1,43 @@
-// src/app.module.ts
-import { Module } from "@nestjs/common";
-import { ConfigModule } from "@nestjs/config";
-import { PrismaModule } from "./prisma/prisma.module";
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { PrismaModule } from './prisma/prisma.module';
 
 // Feature modules
-import { AuthModule } from "./modules/auth/auth.module";
-import { ShipmentsModule } from "./modules/shipments/shipments.module";
+import { AuthModule } from './modules/auth/auth.module';
+import { ShipmentsModule } from './modules/shipments/shipments.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
-import { WarehousesModule } from "./modules/warehouses/warehouses.module";
-import { InventoryModule } from "./modules/inventory/inventory.module";
+import { WarehousesModule } from './modules/warehouses/warehouses.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
 import { ProfileModule } from './modules/profile/profile.module';
-import { MarketplaceWaitlistModule } from "./modules/marketplace-waitlist/marketplace-waitlist.module";
-import { HealthModule } from "./health/health.module";
-import { MailModule } from "./common/mail/mail.module";
-
+import { MarketplaceWaitlistModule } from './modules/marketplace-waitlist/marketplace-waitlist.module';
+import { SettingsModule } from './modules/settings/settings.module';
+import { TransporterBidModule } from './modules/transporter-bid/transporter-bid.module';
+import { TransporterRatingModule } from './modules/transporter-rating/transporter-rating.module';
+import { PaymentModule } from './modules/payment/payment.module';
+import { ReportsModule } from './modules/reports/reports.module';
+import { CommunicationsModule } from './modules/communications/communications.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
-  imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
-    MailModule,
-    PrismaModule,
-    AuthModule,
-    ShipmentsModule,
-    NotificationsModule,
-    WarehousesModule,
-    InventoryModule,
-    ProfileModule,
-    MarketplaceWaitlistModule,
-    HealthModule,
-  ],
-  controllers: [],
-  providers: [],
+   imports: [
+      ConfigModule.forRoot({ isGlobal: true }),
+      PrismaModule,
+      AuthModule,
+      ShipmentsModule,
+      NotificationsModule,
+      WarehousesModule,
+      InventoryModule,
+      ProfileModule,
+      SettingsModule,
+      MarketplaceWaitlistModule,
+      TransporterBidModule,
+      TransporterRatingModule,
+      PaymentModule,
+      ReportsModule,
+      CommunicationsModule,
+      HealthModule,
+   ],
+   controllers: [],
+   providers: [],
 })
 export class AppModule {}

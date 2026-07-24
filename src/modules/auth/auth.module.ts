@@ -7,33 +7,28 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { CloudinaryService } from '../../common/storage/cloudinary.service';
+import { MailService } from '../../common/mail/mail.service';
 import TokenService from './token.service';
 import UrlService from './url.service';
 import { VerifyController } from './verify.controller';
 import { ResetController } from './reset.controller';
 
 @Module({
-  imports: [
-    ConfigModule,
-    PassportModule,
-    JwtModule.registerAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (cfg: ConfigService): JwtModuleOptions => ({
-        secret: cfg.get<string>('JWT_SECRET') ?? 'unsafe-dev-secret',
-        signOptions: { expiresIn: (cfg.get<string>('JWT_EXPIRES_IN') ?? '1h') as any },
+   imports: [
+      ConfigModule,
+      PassportModule,
+      JwtModule.registerAsync({
+         imports: [ConfigModule],
+         inject: [ConfigService],
+         useFactory: (cfg: ConfigService): JwtModuleOptions => ({
+            secret: cfg.get<string>('JWT_SECRET') ?? 'unsafe-dev-secret',
+            signOptions: ['never', 'none', 'false', '0'].includes((cfg.get<string>('JWT_EXPIRES_IN') ?? '').trim().toLowerCase()) ? {} : { expiresIn: (cfg.get<string>('JWT_EXPIRES_IN') ?? '1h') as any },
+         }),
       }),
-    }),
-    PrismaModule,
-  ],
-  controllers: [AuthController, VerifyController, ResetController],
-  providers: [
-    AuthService,
-    JwtStrategy,
-    TokenService,
-    UrlService,
-    { provide: 'StorageService', useClass: CloudinaryService },
-  ],
-  exports: [AuthService, TokenService, UrlService],
+      PrismaModule,
+   ],
+   controllers: [AuthController, VerifyController, ResetController],
+   providers: [AuthService, JwtStrategy, MailService, TokenService, UrlService, { provide: 'StorageService', useClass: CloudinaryService }],
+   exports: [AuthService, TokenService, UrlService],
 })
 export class AuthModule {}
