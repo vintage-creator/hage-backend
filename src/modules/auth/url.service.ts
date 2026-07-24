@@ -20,7 +20,7 @@ export class UrlService {
       const prefix = this.normalizePrefix();
       const p = path.startsWith('/') ? path.slice(1) : path;
       const q = token ? `?token=${encodeURIComponent(token)}` : '';
-      return `${base}${prefix}/${p}${q}`;
+      return `${base}/${p}${q}`;
    }
 
    verificationUrl(token: string) {
