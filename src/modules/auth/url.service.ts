@@ -7,7 +7,14 @@ export class UrlService {
    constructor(private readonly cfg: ConfigService) {}
 
    private normalizeBase() {
-      return (this.cfg.get('APP_URL') ?? 'http://localhost:3000').replace(/\/+$/, '');
+      // Verification / reset links must open the FRONTEND app (which renders the
+      // /verify-email and /reset-password pages), NOT the backend API. Using APP_URL
+      // here sent users to the API host — and because `verify-email` is excluded from
+      // the global `/api` prefix (see main.ts), an APP_URL ending in `/api` produced
+      // `Cannot GET /api/verify-email` 404s. Fall back to APP_URL only for safety.
+      const base =
+         this.cfg.get('FRONTEND_URL') ?? this.cfg.get('APP_URL') ?? 'http://localhost:5173';
+      return base.replace(/\/+$/, '');
    }
 
    normalizePrefix() {
