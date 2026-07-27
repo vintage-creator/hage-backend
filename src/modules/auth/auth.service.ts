@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import type { StorageService } from '../../common/storage/storage.interface';
 import { MailService } from '../../common/mail/mail.service';
 import { RegisterCompanyDto, RegisterKind } from './dto/register-company.dto';
+import { RegisterLastMileProviderDto } from './dto/register-last-mile-provider.dto';
 
 @Injectable()
 export class AuthService {
@@ -307,7 +308,132 @@ export class AuthService {
          throw new BadRequestException(err.message || 'Registration failed');
       }
    }
+
+   async registerLastMileProvider(
+      dto: RegisterLastMileProviderDto,
+      files: {
+         utilityBill: Express.Multer.File;
+         governmentId: Express.Multer.File;
+         passportPhotograph: Express.Multer.File;
+         cacRegistration: Express.Multer.File;
+         vehicleRegistration: Express.Multer.File;
+         vehicleInsurance: Express.Multer.File;
+      },
+   ) {
+      const emailAddress = dto.email.trim();
+      const phoneNumber = this.normalizePhoneNumber(dto.phone, dto.country);
+
+      if (!phoneNumber || !/^\+[1-9]\d{7,14}$/.test(phoneNumber)) {
+         throw new BadRequestException('Phone number must be in international format, for example +2347065737817');
+      }
+
+      const existingUser = await this.prisma.user.findFirst({
+         where: { email: { equals: emailAddress, mode: 'insensitive' } },
+      });
+
+      if (existingUser) {
+         throw new BadRequestException('Email is already registered');
+      }
+
+      // Upload files to Cloudinary in parallel
+      const uploadPromises = [
+         this.storage.uploadFile(files.utilityBill, { folder: 'last-mile-docs' }),
+         this.storage.uploadFile(files.governmentId, { folder: 'last-mile-docs' }),
+         this.storage.uploadFile(files.passportPhotograph, { folder: 'last-mile-docs' }),
+         this.storage.uploadFile(files.cacRegistration, { folder: 'last-mile-docs' }),
+         this.storage.uploadFile(files.vehicleRegistration, { folder: 'last-mile-docs' }),
+         this.storage.uploadFile(files.vehicleInsurance, { folder: 'last-mile-docs' }),
+      ];
+
+      const results = await Promise.all(uploadPromises);
+
+      try {
+         const { company, user } = await this.prisma.$transaction(async (tx) => {
+            const newCompany = await tx.company.create({
+               data: {
+                  fullName: dto.name.trim(),
+                  phoneNumber,
+                  emailAddress,
+                  businessName: dto.businessName.trim(),
+                  businessAddress: dto.businessAddress.trim(),
+                  country: dto.country.trim(),
+                  city: dto.city.trim(),
+                  openingHoursStart: dto.openingHoursStart.trim(),
+                  openingHoursEnd: dto.openingHoursEnd.trim(),
+                  vehicleType: dto.vehicleType.trim(),
+                  businessNumber: dto.businessNumber.trim(),
+                  role: 'LAST_MILE_PROVIDER', // Matches CompanyRole enum in DB
+                  documents: {
+                     create: [
+                        { type: 'UTILITY_BILL', url: results[0].url },
+                        { type: 'GOVERNMENT_ISSUED_ID', url: results[1].url },
+                        { type: 'PASSPORT_PHOTOGRAPH', url: results[2].url },
+                        { type: 'CAC_REGISTRATION_CERTIFICATE', url: results[3].url },
+                        { type: 'VEHICLE_REGISTRATION_CERTIFICATE', url: results[4].url },
+                        { type: 'VEHICLE_INSURANCE', url: results[5].url },
+                     ],
+                  },
+               },
+            });
+
+            const newUser = await tx.user.create({
+               data: {
+                  email: emailAddress,
+                  phone: phoneNumber,
+                  kind: 'LAST_MILE_DELIVERY', // Matches UserKind enum in DB
+                  companyId: newCompany.id,
+                  isVerified: false,
+               },
+            });
+
+            return { company: newCompany, user: newUser };
+         });
+
+         try {
+            const tokenRec = await this.tokenService.createVerificationToken(user.id);
+            const verificationUrl = this.urlService.verificationUrl(tokenRec.token);
+
+            const emailContext = {
+               fullName: dto.name.trim(),
+               businessName: dto.businessName.trim(),
+               verificationUrl,
+               phoneNumber,
+            };
+
+            await this.mailer.sendVerificationEmail(user.email!, emailContext);
+         } catch (verificationErr) {
+            try {
+               await this.prisma.$transaction([
+                  this.prisma.verificationToken.deleteMany({ where: { userId: user.id } }),
+                  this.prisma.refreshToken.deleteMany({ where: { userId: user.id } }),
+                  this.prisma.passwordResetToken.deleteMany({ where: { userId: user.id } }),
+                  this.prisma.user.delete({ where: { id: user.id } }),
+                  this.prisma.company.delete({ where: { id: company.id } }),
+               ]);
+            } catch (cleanupErr) {
+               this.logger.error('Failed to cleanup after verification send failure: ' + ((cleanupErr as any)?.message ?? String(cleanupErr)));
+            }
+
+            const message = (verificationErr as any)?.response?.message || (verificationErr as any)?.message;
+            throw new BadRequestException(message || 'Failed to send verification email. Please try again.');
+         }
+
+         return {
+            ok: true,
+            verificationMethod: 'EMAIL_LINK',
+         };
+      } catch (err: any) {
+         if (err?.code === 'P2002') {
+            throw new BadRequestException('Email or phone already registered');
+         }
+         throw new BadRequestException(err.message || 'Registration failed');
+      }
+   }
+
    async verifyEmail(token: string) {
+      if (!token || typeof token !== 'string') {
+         throw new BadRequestException('Invalid or missing token');
+      }
       const rec = await this.tokenService.findVerificationToken(token);
 
       if (!rec || rec.expiresAt < new Date()) {
@@ -372,11 +498,12 @@ export class AuthService {
          phone: rec.user.phone ?? null,
          companyId: rec.user.companyId ?? null,
          expiresAt: emailToken.expiresAt,
+         verificationToken: emailToken.token,
       };
    }
 
    async verifyResetToken(token: string) {
-      if (!token) throw new BadRequestException('Missing token');
+      if (!token || typeof token !== 'string') throw new BadRequestException('Invalid or missing token');
 
       const rec = await this.tokenService.findPasswordResetToken(token);
       if (!rec || rec.used || rec.expiresAt < new Date()) {
@@ -390,8 +517,11 @@ export class AuthService {
       };
    }
 
-   async setPassword(verificationToken: string, password: string, retype: string) {
-      if (password !== retype) throw new BadRequestException('Passwords do not match');
+    async setPassword(verificationToken: string, password: string, retype: string) {
+       if (!verificationToken || typeof verificationToken !== 'string') {
+          throw new BadRequestException('Invalid or missing verification token');
+       }
+       if (password !== retype) throw new BadRequestException('Passwords do not match');
       if (!isStrongPassword(password)) throw new BadRequestException('Password is not strong enough');
       if (/^\d{4}$/.test(verificationToken)) {
          throw new BadRequestException('Verify the code before setting a password');
@@ -418,6 +548,7 @@ export class AuthService {
          sub: user.id,
          email: user.email,
          kind: user.kind,
+         role: user.company?.role ?? null,
       };
 
       const accessToken = this.signAccessToken(payload);
@@ -491,6 +622,7 @@ export class AuthService {
          sub: user.id,
          email: user.email,
          kind: user.kind,
+         role: user.company?.role ?? null,
       };
 
       const accessToken = this.signAccessToken(payload);
@@ -558,6 +690,7 @@ export class AuthService {
          sub: stored.user.id,
          email: stored.user.email,
          kind: stored.user.kind,
+         role: stored.user.company?.role ?? null,
       };
 
       const accessToken = this.signAccessToken(payload);
@@ -727,6 +860,9 @@ export class AuthService {
    }
 
    async resetPassword(token: string, password: string, retype: string) {
+      if (!token || typeof token !== 'string') {
+         throw new BadRequestException('Invalid or missing token');
+      }
       if (password !== retype) throw new BadRequestException('Passwords do not match');
       if (!isStrongPassword(password)) throw new BadRequestException('Password is not strong enough');
 
@@ -771,6 +907,7 @@ export class AuthService {
          sub: user.id,
          email: user.email,
          kind: user.kind,
+         role: user.company?.role ?? null,
       };
 
       const accessToken = this.signAccessToken(payload);
@@ -801,5 +938,13 @@ export class AuthService {
             company: user.company ? { id: user.company.id, businessName: user.company.businessName } : null,
          },
       };
+   }
+
+   decodeToken(token: string): any {
+      try {
+         return this.jwt.decode(token);
+      } catch {
+         return null;
+      }
    }
 }

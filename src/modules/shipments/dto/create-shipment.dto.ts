@@ -13,6 +13,7 @@ export enum VisibilityEnum {
    ASSIGNED = 'ASSIGNED',
 }
 
+
 export enum FreightTypeEnum {
    SEA_FREIGHT = 'SEA_FREIGHT',
    AIR_FREIGHT = 'AIR_FREIGHT',

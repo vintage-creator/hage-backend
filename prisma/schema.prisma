@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum UserKind {
@@ -24,6 +25,12 @@ enum CompanyRole {
 enum DocType {
   COMPANY_REGISTRATION_CERTIFICATE
   TAX_REGISTRATION_CERTIFICATE
+  UTILITY_BILL
+  GOVERNMENT_ISSUED_ID
+  PASSPORT_PHOTOGRAPH
+  VEHICLE_REGISTRATION_CERTIFICATE
+  VEHICLE_INSURANCE
+  CAC_REGISTRATION_CERTIFICATE
 }
 
 enum WarehouseStatus {
@@ -74,6 +81,7 @@ enum ShipmentStatus {
   DELIVERED
   COMPLETED
   CANCELLED
+  FAILED
 }
 
 enum BidStatus {
@@ -102,6 +110,8 @@ enum DocumentType {
   PACKING_LIST
   WAYBILL
   BILL_OF_LADING
+  PROOF_OF_DELIVERY
+  SIGNATURE
   OTHER
 }
 
@@ -121,6 +131,25 @@ enum CardBrand {
   MASTERCARD
 }
 
+enum DriverEarningStatus {
+  PENDING
+  AVAILABLE
+  WITHDRAWN
+}
+
+enum WithdrawalStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum SavedTransporterStatus {
+  INVITED // invite sent, transporter has not yet linked/joined
+  ACTIVE // linked to a real transporter account
+  DECLINED // transporter rejected the invite / relationship
+}
+
 model User {
   id             String    @id @default(cuid())
   email          String?   @unique
@@ -133,6 +162,11 @@ model User {
   deactivatedAt  DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+
+  // LAST_MILE_DELIVERY driver fields
+  isAvailable   Boolean @default(false) // online/offline toggle on the driver dashboard
+  walletBalance Float   @default(0) // amount currently available to withdraw
+  totalEarnings Float   @default(0) // lifetime earnings (informational)
 
   company             Company?             @relation(fields: [companyId], references: [id])
   verificationTokens  VerificationToken[]
@@ -154,6 +188,11 @@ model User {
   ratingsGiven          TransporterRating[]     @relation("RatingsGiven")
   payments              Payment[]
   communicationMessages CommunicationMessage[]
+  driverEarnings        DriverEarning[]         @relation("DriverEarnings")
+  withdrawals           Withdrawal[]
+
+  savedTransporters   SavedTransporter[] @relation("SavedTransporterOwner")
+  linkedAsTransporter SavedTransporter[] @relation("SavedTransporterLink")
 }
 
 model Company {
@@ -166,6 +205,11 @@ model Company {
   country         String?
   language        String?
   role            CompanyRole?
+  city            String?
+  openingHoursStart String?
+  openingHoursEnd   String?
+  vehicleType     String?
+  businessNumber  String?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
@@ -267,10 +311,12 @@ model PaymentMethod {
   accountNumberLast4 String?
   bankSortCode       String?
   currency           String?
+  isDefault          Boolean           @default(false) // default withdrawal account for LAST_MILE_DELIVERY drivers
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  withdrawals Withdrawal[]
 
   @@index([userId])
 }
@@ -546,6 +592,17 @@ model Shipment {
   currentLat  Float?
   currentLng  Float?
 
+  // DELIVERY COMPLETION (last-mile driver flow: photo -> confirm code -> signature)
+  deliveryCode    String? // 4-digit code shared with the customer, confirmed by the driver on drop-off
+  proofPhotoUrl   String? // "Take Photo" step
+  codeConfirmedAt DateTime? // set once the driver enters the matching deliveryCode
+  signatureUrl    String? // customer signature captured on the final step
+  deliveredAt     DateTime? // actual completion timestamp (deliveryDate above is the ETA)
+
+  // DELIVERY FAILURE (driver "Cancel Delivery" action, e.g. rider denied entry)
+  failureReason String?
+  failedAt      DateTime?
+
   // TRACKING
   createdBy  String
   customerId String
@@ -568,6 +625,7 @@ model Shipment {
   bids                TransporterBid[]
   payment             Payment?
   communicationThread CommunicationThread?
+  driverEarning       DriverEarning?
 
   @@index([orderId])
   @@index([status])
@@ -754,4 +812,72 @@ model Payment {
   @@index([userId])
   @@index([reference])
   @@index([status])
+}
+
+/**
+ * --- LAST_MILE_DELIVERY driver wallet ---
+ */
+model DriverEarning {
+  id         String              @id @default(cuid())
+  driverId   String
+  shipmentId String              @unique
+  amount     Float
+  status     DriverEarningStatus @default(AVAILABLE)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  driver   User     @relation("DriverEarnings", fields: [driverId], references: [id], onDelete: Cascade)
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([driverId])
+  @@index([status])
+}
+
+model Withdrawal {
+  id            String           @id @default(cuid())
+  userId        String
+  amount        Float
+  fee           Float            @default(0)
+  netAmount     Float
+  bankAccountId String?
+  bankName      String?
+  accountName   String?
+  accountNumberLast4 String?
+  status        WithdrawalStatus @default(PENDING)
+  reference     String           @unique
+  failureReason String?
+  createdAt     DateTime         @default(now())
+  processedAt   DateTime?
+
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankAccount PaymentMethod? @relation(fields: [bankAccountId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}
+
+/**
+ * --- Enterprise "Add transporter" / "Saved transporter" address book ---
+ * An enterprise (or any shipment-creating account) can save transporters they
+ * work with. Saving sends an invite (name + phone + email). If a matching
+ * transporter account already exists it is linked immediately.
+ */
+model SavedTransporter {
+  id            String                  @id @default(cuid())
+  ownerId       String // the enterprise/LSP user who added this transporter
+  name          String
+  countryCode   String                  @default("+1")
+  phone         String
+  email         String
+  transporterId String? // linked User once matched with a real transporter account
+  status        SavedTransporterStatus  @default(INVITED)
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  owner       User  @relation("SavedTransporterOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  transporter User? @relation("SavedTransporterLink", fields: [transporterId], references: [id])
+
+  @@unique([ownerId, email])
+  @@index([ownerId])
+  @@index([transporterId])
 }

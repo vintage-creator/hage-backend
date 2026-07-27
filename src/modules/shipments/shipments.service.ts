@@ -23,6 +23,9 @@ enum DocumentType {
 // Platform fee rate (2.5%)
 const TRANSACTION_FEE_RATE = 0.025;
 
+// Share of the shipment total cost credited to a LAST_MILE_DELIVERY driver's wallet on delivery
+const DRIVER_EARNING_RATE = 0.8;
+
 @Injectable()
 export class ShipmentsService {
    private readonly logger = new Logger(ShipmentsService.name);
@@ -304,6 +307,22 @@ export class ShipmentsService {
             include: { transporter: true, warehouse: true, documents: true },
          });
          await tx.shipmentStatusHistory.create({ data: { shipmentId, status: dto.status as any, updatedBy, note: dto.note } });
+
+         // Credit the assigned last-mile driver's wallet the first time a shipment is marked DELIVERED
+         if (dto.status === ShipmentStatus.DELIVERED && updatedShipment.assignedTransporterId && updatedShipment.transporter?.kind === 'LAST_MILE_DELIVERY') {
+            const existingEarning = await tx.driverEarning.findUnique({ where: { shipmentId } });
+            if (!existingEarning) {
+               const amount = Math.round(updatedShipment.totalCost * DRIVER_EARNING_RATE * 100) / 100;
+               await tx.driverEarning.create({
+                  data: { driverId: updatedShipment.assignedTransporterId, shipmentId, amount, status: 'AVAILABLE' },
+               });
+               await tx.user.update({
+                  where: { id: updatedShipment.assignedTransporterId },
+                  data: { walletBalance: { increment: amount }, totalEarnings: { increment: amount } },
+               });
+            }
+         }
+
          return updatedShipment;
       });
 
@@ -399,8 +418,8 @@ export class ShipmentsService {
    }
 
    async findAllForTransporter(transporterId: string, filters: FilterShipmentDto) {
-      const user = await this.prisma.user.findUnique({ where: { id: transporterId }, select: { kind: true } });
-      if (!user || user.kind !== 'LAST_MILE_DELIVERY') throw new ForbiddenException('User is not a transporter');
+      const user = await this.prisma.user.findUnique({ where: { id: transporterId }, include: { company: true } });
+      if (!user || !this.isTransporterAccount(user)) throw new ForbiddenException('User is not a transporter');
 
       const { page = 1, limit = 20, ...filterCriteria } = filters;
       const skip = (page - 1) * limit;
@@ -415,6 +434,93 @@ export class ShipmentsService {
       ]);
 
       return { data: shipments, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+   }
+
+   // A user counts as a "transporter" for assignment/accept-reject purposes if
+   // they're a LAST_MILE_DELIVERY driver, or a LOGISTIC_SERVICE_PROVIDER company
+   // whose CompanyRole is TRANSPORTER.
+   private isTransporterAccount(user: { kind?: string; company?: { role?: string | null } | null }): boolean {
+      return user.kind === 'LAST_MILE_DELIVERY' || user.company?.role === 'TRANSPORTER';
+   }
+
+   // ─────────────────────────────────────────────────────────────────────────
+   // NEW SHIPMENT REQUESTS (transporter "Home" screen — awaiting Accept/Reject)
+   // ─────────────────────────────────────────────────────────────────────────
+   async getNewShipmentRequests(transporterId: string) {
+      const user = await this.prisma.user.findUnique({ where: { id: transporterId }, include: { company: true } });
+      if (!user || !this.isTransporterAccount(user)) throw new ForbiddenException('User is not a transporter');
+
+      const requests = await this.prisma.shipment.findMany({
+         where: { assignedTransporterId: transporterId, status: ShipmentStatus.PENDING as any },
+         orderBy: { createdAt: 'desc' },
+         include: {
+            creator: { select: { id: true, email: true, company: { select: { businessName: true } } } },
+            documents: true,
+         },
+      });
+
+      return {
+         data: requests.map((r: any) => ({
+            id: r.id,
+            orderId: r.orderId,
+            postedBy: r.creator?.company?.businessName ?? r.creator?.email ?? 'Unknown',
+            postedAt: r.createdAt,
+            estimatedPayment: r.totalCost,
+            cargoType: r.cargoType,
+            weight: r.weight,
+            handlingInstructions: r.handlingInstructions,
+            origin: r.origin,
+            destination: r.destination,
+            pickupDate: r.pickupDate,
+            deliveryDate: r.deliveryDate,
+         })),
+      };
+   }
+
+   // ─────────────────────────────────────────────────────────────────────────
+   // TRANSPORTER ACCEPT / REJECT A DIRECTLY-ASSIGNED SHIPMENT REQUEST
+   // (the "Accept this shipment?" / Accept Shipment / Reject Shipment screen)
+   // ─────────────────────────────────────────────────────────────────────────
+   async respondToShipmentRequest(shipmentId: string, transporterId: string, action: 'ACCEPT' | 'REJECT', reason?: string): Promise<Shipment> {
+      const user = await this.prisma.user.findUnique({ where: { id: transporterId }, include: { company: true } });
+      if (!user || !this.isTransporterAccount(user)) throw new ForbiddenException('User is not a transporter');
+
+      const shipment = await this.prisma.shipment.findUnique({ where: { id: shipmentId } });
+      if (!shipment) throw new NotFoundException('Shipment not found');
+
+      if (shipment.assignedTransporterId !== transporterId) {
+         throw new ForbiddenException('This shipment was not assigned to you');
+      }
+      if (shipment.status !== (ShipmentStatus.PENDING as any)) {
+         throw new BadRequestException('This shipment request has already been responded to');
+      }
+
+      const nextStatus = action === 'ACCEPT' ? (ShipmentStatus.ACCEPTED as any) : (ShipmentStatus.CANCELLED as any);
+      const note = action === 'ACCEPT' ? 'Accepted by transporter' : reason ? `Rejected by transporter: ${reason}` : 'Rejected by transporter';
+
+      const updated = await this.prisma.$transaction(async (tx: any) => {
+         const updatedShipment = await tx.shipment.update({
+            where: { id: shipmentId },
+            data: {
+               status: nextStatus,
+               // free the shipment back up for reassignment if the transporter rejected it
+               assignedTransporterId: action === 'REJECT' ? null : shipment.assignedTransporterId,
+            },
+            include: { transporter: true },
+         });
+
+         await tx.shipmentStatusHistory.create({ data: { shipmentId, status: nextStatus, updatedBy: transporterId, note } });
+
+         return updatedShipment;
+      });
+
+      await Promise.all([
+         this.createNotification(transporterId, `You ${action === 'ACCEPT' ? 'accepted' : 'rejected'} shipment ${updated.orderId}`, 'in-app'),
+         this.createNotification(updated.createdBy, `Shipment ${updated.orderId} was ${action === 'ACCEPT' ? 'accepted' : 'rejected'} by the transporter`, 'in-app'),
+         this.createNotification(updated.customerId, `Shipment ${updated.orderId} was ${action === 'ACCEPT' ? 'accepted' : 'rejected'} by the transporter`, 'in-app'),
+      ]);
+
+      return updated;
    }
 
    async findAllForCustomer(customerId: string, filters: FilterShipmentDto) {

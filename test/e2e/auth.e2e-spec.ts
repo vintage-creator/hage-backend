@@ -108,7 +108,7 @@ describe('Auth (e2e) — register / code verify / set-password / login', () => {
          }
          const registerRes = await req.expect(201);
 
-         expect(registerRes.body).toEqual(expect.objectContaining({ ok: true, verificationMethod: 'CODE' }));
+         expect(registerRes.body).toEqual(expect.objectContaining({ ok: true, verificationMethod: 'PHONE_CODE' }));
 
          // 2) Find created user + verification token in DB
          const user = await prisma.user.findUnique({
