@@ -63,3 +63,6 @@ clients/
 
 
 migrations
+
+# Local database
+/pg_data/

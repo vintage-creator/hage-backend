@@ -24,7 +24,7 @@ async function bootstrap() {
    const swaggerServerUrls = configuredSwaggerServers.length
       ? configuredSwaggerServers
       : isDev
-        ? [process.env.APP_URL || `http://localhost:${port}`]
+        ? [`http://localhost:${port}`, process.env.APP_URL].filter(Boolean) as string[]
         : ['https://hage-backend.onrender.com', 'https://api.tryhage.com'];
 
    const swaggerBuilder = new DocumentBuilder()

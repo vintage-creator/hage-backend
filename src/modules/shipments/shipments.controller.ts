@@ -269,7 +269,7 @@ export class ShipmentsController {
    // ✅ TRANSPORTER'S SHIPMENTS
    @Get('my/assigned')
    @UseGuards(JwtAuthGuard, RolesGuard)
-   @Roles('TRANSPORTER')
+   @Roles('TRANSPORTER', 'LAST_MILE_DELIVERY')
    @ApiBearerAuth('access-token')
    @ApiOperation({
       summary: 'Get shipments assigned to a transporter',
@@ -277,6 +277,52 @@ export class ShipmentsController {
    })
    async getMyAssignedShipments(@Query() filters: FilterShipmentDto, @Req() req: any) {
       return this.svc.findAllForTransporter(req.user.id, filters);
+   }
+
+   // ✅ TRANSPORTER'S NEW REQUESTS (Home screen — Accept Shipment / Reject Shipment)
+   @Get('requests/new')
+   @UseGuards(JwtAuthGuard, RolesGuard)
+   @Roles('TRANSPORTER', 'LAST_MILE_DELIVERY')
+   @ApiBearerAuth('access-token')
+   @ApiOperation({
+      summary: "Get new shipment requests awaiting the transporter's decision",
+      description: 'Shipments directly assigned to this transporter that are still PENDING — shown on the transporter "New Request" screen with Accept/Reject actions.',
+   })
+   async getNewShipmentRequests(@Req() req: any) {
+      return this.svc.getNewShipmentRequests(req.user.id);
+   }
+
+   // ✅ TRANSPORTER ACCEPTS A SHIPMENT REQUEST
+   @Patch(':id/accept')
+   @UseGuards(JwtAuthGuard, RolesGuard)
+   @Roles('TRANSPORTER', 'LAST_MILE_DELIVERY')
+   @ApiBearerAuth('access-token')
+   @ApiParam({ name: 'id', description: 'Shipment ID' })
+   @ApiOperation({
+      summary: 'Accept a shipment request',
+      description: 'Transporter accepts a shipment that was directly assigned to them. Moves the shipment from PENDING to ACCEPTED.',
+   })
+   async acceptShipmentRequest(@Param('id') id: string, @Req() req: any) {
+      return this.svc.respondToShipmentRequest(id, req.user.id, 'ACCEPT');
+   }
+
+   // ✅ TRANSPORTER REJECTS A SHIPMENT REQUEST
+   @Patch(':id/reject')
+   @UseGuards(JwtAuthGuard, RolesGuard)
+   @Roles('TRANSPORTER', 'LAST_MILE_DELIVERY')
+   @ApiBearerAuth('access-token')
+   @ApiParam({ name: 'id', description: 'Shipment ID' })
+   @ApiBody({
+      description: 'Optional reason for rejecting the shipment',
+      required: false,
+      schema: { type: 'object', properties: { reason: { type: 'string', example: 'Vehicle unavailable for this route' } } },
+   })
+   @ApiOperation({
+      summary: 'Reject a shipment request',
+      description: 'Transporter rejects a shipment that was directly assigned to them. The shipment is unassigned and moved to CANCELLED so it can be reassigned.',
+   })
+   async rejectShipmentRequest(@Param('id') id: string, @Body('reason') reason: string | undefined, @Req() req: any) {
+      return this.svc.respondToShipmentRequest(id, req.user.id, 'REJECT', reason);
    }
 
    // ✅ CUSTOMER'S SHIPMENTS
