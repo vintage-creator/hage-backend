@@ -20,7 +20,8 @@ export class UrlService {
       // configured origin is accidentally set to the API path (e.g.
       // https://tryhage.com/api), strip the trailing /api so we don't emit
       // /api/verify-email — which the app proxies to a non-existent backend route.
-      return base.replace(/\/api\/?$/i, '').replace(/\/+$/, '');
+      // return base.replace(/\/api\/?$/i, '').replace(/\/+$/, '');
+      return base;
    }
 
    normalizePrefix() {
