@@ -16,9 +16,7 @@ export class UrlService {
       // environments) must fall through to APP_URL, otherwise the base is "" and
       // links become relative/broken.
       const base =
-         this.cfg.get<string>('FRONTEND_URL')?.trim() ||
-         this.cfg.get<string>('APP_URL')?.trim() ||
-         'http://localhost:5173';
+         this.cfg.get<string>('FRONTEND_URL')?.trim() || this.cfg.get<string>('APP_URL')?.trim() || 'http://localhost:5173';
       // Defensive: these are frontend page URLs, never under the API prefix. If the
       // configured origin is accidentally set to the API path (e.g.
       // https://tryhage.com/api), strip the trailing /api so we don't emit
