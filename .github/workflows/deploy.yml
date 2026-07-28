@@ -339,6 +339,7 @@ jobs:
                 },
                 "RuntimeEnvironmentSecrets": {
                   "DATABASE_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/rds/master-xRcVlo:DATABASE_URL::",
+                  "DIRECT_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/rds/master-xRcVlo:DATABASE_URL::",
                   "JWT_SECRET": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/jwt-secret-oqoaaG",
                   "CLOUDINARY_CLOUD_NAME": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/cloudinary-credentials-ESKjAs:cloud_name::",
                   "CLOUDINARY_API_KEY": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/cloudinary-credentials-ESKjAs:api_key::",
@@ -479,6 +480,28 @@ jobs:
           echo "Service URL: $SERVICE_URL"
           echo "Waiting for health check..."
           wait_for_health_endpoint "$SERVICE_URL" || exit 1
+
+          # Post-deploy DB check: /api/health does NOT touch the database, so a broken
+          # migration/schema still passes it. Probe an endpoint that runs a query — login
+          # with bogus creds hits the User table: DB healthy => 4xx, DB broken => 5xx.
+          echo "Running post-deploy DB check (POST /api/auth/login)..."
+          DB_CHECK_OK=0
+          for i in $(seq 1 10); do
+            DB_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+              -X POST "https://${SERVICE_URL}/api/auth/login" \
+              -H 'Content-Type: application/json' \
+              -d '{"identifier":"deploy-healthcheck@example.invalid","password":"x"}' || echo 000)
+            echo "  attempt $i/10: HTTP $DB_CODE"
+            if [ "$DB_CODE" = "000" ]; then sleep 6; continue; fi
+            if [ "$DB_CODE" -ge 500 ]; then
+              echo "::error::Post-deploy DB check FAILED — /api/auth/login returned $DB_CODE. App cannot query the DB (likely a migration/schema error)."
+              exit 1
+            fi
+            echo "DB check OK (HTTP $DB_CODE — app reached the database)."
+            DB_CHECK_OK=1
+            break
+          done
+          if [ "$DB_CHECK_OK" != "1" ]; then echo "::error::Post-deploy DB check got no valid response."; exit 1; fi
           echo "Deployment complete. Monitor in AWS App Runner console:"
           echo "   https://console.aws.amazon.com/apprunner/home?region=${{ env.AWS_REGION }}#/services"
 
@@ -617,6 +640,7 @@ jobs:
                 },
                 "RuntimeEnvironmentSecrets": {
                   "DATABASE_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/rds/master-xRcVlo:DATABASE_URL::",
+                  "DIRECT_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/rds/master-xRcVlo:DATABASE_URL::",
                   "JWT_SECRET": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/jwt-secret-VfHP6e",
                   "CLOUDINARY_CLOUD_NAME": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/cloudinary-credentials-rzQzW0:cloud_name::",
                   "CLOUDINARY_API_KEY": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/cloudinary-credentials-rzQzW0:api_key::",
@@ -670,8 +694,50 @@ jobs:
           # Clean up temporary files
           rm -f apprunner-config.json health-check-config.json instance-config.json network-config.json
           
-          echo "Deployment initiated successfully"
-          echo "Service ARN: arn:aws:apprunner:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:service/$SERVICE_NAME"
+          # Wait for the rollout to reach RUNNING, then verify the DB. /api/health does
+          # not touch the database, so a broken migration would otherwise deploy "green".
+          SERVICE_ARN=$(aws apprunner list-services --region ${{ env.AWS_REGION }} \
+            --query "ServiceSummaryList[?ServiceName=='$SERVICE_NAME'].ServiceArn | [0]" --output text)
+          if [ -z "$SERVICE_ARN" ] || [ "$SERVICE_ARN" = "None" ]; then
+            echo "::error::Could not resolve ServiceArn for $SERVICE_NAME"; exit 1
+          fi
+          echo "Waiting for App Runner rollout to reach RUNNING..."
+          for i in $(seq 1 90); do
+            ST=$(aws apprunner describe-service --service-arn "$SERVICE_ARN" --region ${{ env.AWS_REGION }} --query 'Service.Status' --output text 2>/dev/null || echo UNKNOWN)
+            echo "  status: $ST ($i/90)"
+            if [ "$ST" = "RUNNING" ]; then break; fi
+            if [ "$ST" = "CREATE_FAILED" ] || [ "$ST" = "UPDATE_FAILED" ] || [ "$ST" = "DELETE_FAILED" ]; then
+              echo "::error::Service entered $ST"; exit 1
+            fi
+            sleep 10
+          done
+          SERVICE_URL=$(aws apprunner describe-service --service-arn "$SERVICE_ARN" --region ${{ env.AWS_REGION }} --query 'Service.ServiceUrl' --output text)
+          echo "Service URL: $SERVICE_URL"
+
+          # Post-deploy DB check: login with bogus creds runs a User query.
+          # DB healthy => 4xx, DB/migration broken => 5xx.
+          echo "Running post-deploy DB check (POST /api/auth/login)..."
+          DB_CHECK_OK=0
+          for i in $(seq 1 10); do
+            DB_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+              -X POST "https://${SERVICE_URL}/api/auth/login" \
+              -H 'Content-Type: application/json' \
+              -d '{"identifier":"deploy-healthcheck@example.invalid","password":"x"}' || echo 000)
+            echo "  attempt $i/10: HTTP $DB_CODE"
+            if [ "$DB_CODE" = "000" ]; then sleep 6; continue; fi
+            if [ "$DB_CODE" -ge 500 ]; then
+              echo "::error::Post-deploy DB check FAILED — /api/auth/login returned $DB_CODE. Production cannot query the DB (likely a migration/schema error)."
+              exit 1
+            fi
+            echo "DB check OK (HTTP $DB_CODE — production reached the database)."
+            DB_CHECK_OK=1
+            break
+          done
+          if [ "$DB_CHECK_OK" != "1" ]; then echo "::error::Post-deploy DB check got no valid response."; exit 1; fi
+
+          echo "Deployment complete and DB check passed."
+          echo "Service ARN: $SERVICE_ARN"
+          echo "URL: $SERVICE_URL"
 
   rollback-dev:
     name: Rollback Development
@@ -788,6 +854,7 @@ jobs:
                 },
                 "RuntimeEnvironmentSecrets": {
                   "DATABASE_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/rds/master-xRcVlo:DATABASE_URL::",
+                  "DIRECT_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/rds/master-xRcVlo:DATABASE_URL::",
                   "JWT_SECRET": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/jwt-secret-oqoaaG",
                   "CLOUDINARY_CLOUD_NAME": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/cloudinary-credentials-ESKjAs:cloud_name::",
                   "CLOUDINARY_API_KEY": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/cloudinary-credentials-ESKjAs:api_key::",
@@ -948,6 +1015,7 @@ jobs:
                 },
                 "RuntimeEnvironmentSecrets": {
                   "DATABASE_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/rds/master-xRcVlo:DATABASE_URL::",
+                  "DIRECT_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/rds/master-xRcVlo:DATABASE_URL::",
                   "JWT_SECRET": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/jwt-secret-VfHP6e",
                   "CLOUDINARY_CLOUD_NAME": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/cloudinary-credentials-rzQzW0:cloud_name::",
                   "CLOUDINARY_API_KEY": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/cloudinary-credentials-rzQzW0:api_key::",
