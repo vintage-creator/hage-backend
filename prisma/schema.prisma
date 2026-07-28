@@ -564,6 +564,8 @@ model Shipment {
   handlingInstructions String?
   specialHandling      String?
   itemCompactibility   String?
+  shippingCost         Float   @default(0)
+  tonnage              String?
 
   // INLAND-SPECIFIC
   truckType String? // e.g. Tipper, Flatbed

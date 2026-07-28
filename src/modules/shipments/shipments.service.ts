@@ -165,6 +165,8 @@ export class ShipmentsService {
                   insuranceFee: insurance,
                   transactionFee,
                   totalCost,
+                  shippingCost: dto.shippingCost,
+                  tonnage: dto.tonnage,
                   status: ShipmentStatus.PENDING as any,
                   assignedTransporterId: dto.transporterId ?? null,
                   pickupLat: dto.pickupLat ?? null,

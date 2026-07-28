@@ -13,7 +13,6 @@ export enum VisibilityEnum {
    ASSIGNED = 'ASSIGNED',
 }
 
-
 export enum FreightTypeEnum {
    SEA_FREIGHT = 'SEA_FREIGHT',
    AIR_FREIGHT = 'AIR_FREIGHT',
@@ -105,6 +104,18 @@ export class CreateShipmentDto {
    @IsString()
    @IsOptional()
    cargoType?: string;
+
+   @ApiPropertyOptional()
+   @IsString()
+   @IsOptional()
+   tonnage?: string;
+
+   @ApiPropertyOptional()
+   @IsNumber()
+   @Min(0)
+   @Type(() => Number)
+   @IsOptional()
+   shippingCost?: string;
 
    @ApiPropertyOptional()
    @IsNumber()
