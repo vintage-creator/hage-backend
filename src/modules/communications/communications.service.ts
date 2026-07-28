@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { CallSessionStatus, ShipmentStatus } from '@prisma/client';
 import { createHmac, randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SendShipmentMessageDto, StartShipmentCallDto, UpdateShipmentCallDto } from './dto/communications.dto';
+import { SendShipmentMessageDto, StartShipmentCallDto, UpdateShipmentCallDto, UpdateShipmentMessageDto } from './dto/communications.dto';
 
 const ACTIVE_SHIPMENT_STATUSES: ShipmentStatus[] = [ShipmentStatus.ACCEPTED, ShipmentStatus.IN_WAREHOUSE, ShipmentStatus.IN_TRANSIT, ShipmentStatus.PICKED_UP];
 
@@ -186,6 +186,41 @@ export class CommunicationsService {
             },
          },
       });
+   }
+
+   async updateMessage(shipmentId: string, messageId: string, userId: string, dto: UpdateShipmentMessageDto) {
+      const shipment = await this.getShipmentForCommunication(shipmentId, userId);
+      const thread = await this.getOrCreateThread(shipment);
+      const message = await this.prisma.communicationMessage.findFirst({
+         where: { id: messageId, threadId: thread.id },
+      });
+
+      if (!message) throw new NotFoundException('Message not found');
+      if (message.senderId !== userId) throw new ForbiddenException('Only the sender can edit this message');
+
+      return this.prisma.communicationMessage.update({
+         where: { id: message.id },
+         data: { body: dto.body.trim() },
+         include: {
+            sender: {
+               select: { id: true, email: true, phone: true, kind: true, company: { select: { fullName: true, businessName: true } } },
+            },
+         },
+      });
+   }
+
+   async deleteMessage(shipmentId: string, messageId: string, userId: string) {
+      const shipment = await this.getShipmentForCommunication(shipmentId, userId);
+      const thread = await this.getOrCreateThread(shipment);
+      const message = await this.prisma.communicationMessage.findFirst({
+         where: { id: messageId, threadId: thread.id },
+      });
+
+      if (!message) throw new NotFoundException('Message not found');
+      if (message.senderId !== userId) throw new ForbiddenException('Only the sender can delete this message');
+
+      await this.prisma.communicationMessage.delete({ where: { id: message.id } });
+      return { ok: true, message: 'Message deleted' };
    }
 
    async markMessagesRead(shipmentId: string, userId: string) {

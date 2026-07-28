@@ -1,10 +1,21 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { SettingsService } from './settings.service';
 import { CreateSlaDto } from './dto/create-sla.dto';
-import { InviteTeamMemberDto, LanguageSettingDto, NotificationSettingsDto, PaymentMethodDto, ReportIssueDto, UpdateEndUserProfileDto, UpdateEnterpriseProfileDto } from './dto/settings.dto';
+import {
+   InviteTeamMemberDto,
+   LanguageSettingDto,
+   NotificationSettingsDto,
+   PaymentMethodDto,
+   ReportIssueDto,
+   TeamInviteStatusQueryDto,
+   UpdateTeamMemberRoleDto,
+   UpdateEndUserProfileDto,
+   UpdateEnterpriseProfileDto,
+   UpdateTeamInviteDto,
+} from './dto/settings.dto';
 
 @ApiTags('settings')
 @Controller('settings')
@@ -88,6 +99,39 @@ export class SettingsController {
    @ApiOperation({ summary: 'Invite team member by email' })
    inviteTeamMember(@Req() req: Request, @Body() dto: InviteTeamMemberDto) {
       return this.settings.inviteTeamMember(this.userId(req), dto);
+   }
+
+   @Get('team/invites')
+   @ApiOperation({
+      summary: 'List team invites',
+      description: 'Enterprise users can fetch all invited team members, optionally filtered by PENDING, ACCEPTED, DECLINED, or CANCELLED.',
+   })
+   listTeamInvites(@Req() req: Request, @Query() query: TeamInviteStatusQueryDto) {
+      return this.settings.listTeamInvites(this.userId(req), query.status);
+   }
+
+   @Patch('team/invites/:id')
+   @ApiOperation({ summary: 'Update team invite status' })
+   updateTeamInvite(@Req() req: Request, @Param('id') id: string, @Body() dto: UpdateTeamInviteDto) {
+      return this.settings.updateTeamInvite(this.userId(req), id, dto);
+   }
+
+   @Get('team/members')
+   @ApiOperation({ summary: 'List team members' })
+   listTeamMembers(@Req() req: Request) {
+      return this.settings.listTeamMembers(this.userId(req));
+   }
+
+   @Patch('team/members/:id/role')
+   @ApiOperation({ summary: 'Update team member role' })
+   updateTeamMemberRole(@Req() req: Request, @Param('id') id: string, @Body() dto: UpdateTeamMemberRoleDto) {
+      return this.settings.updateTeamMemberRole(this.userId(req), id, dto);
+   }
+
+   @Delete('team/members/:id')
+   @ApiOperation({ summary: 'Remove team member' })
+   removeTeamMember(@Req() req: Request, @Param('id') id: string) {
+      return this.settings.removeTeamMember(this.userId(req), id);
    }
 
    @Patch('enterprise/profile')

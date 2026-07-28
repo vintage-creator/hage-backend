@@ -150,6 +150,12 @@ enum SavedTransporterStatus {
   DECLINED // transporter rejected the invite / relationship
 }
 
+enum TeamMemberRole {
+  ADMIN
+  MANAGER
+  VIEWER
+}
+
 model User {
   id             String    @id @default(cuid())
   email          String?   @unique
@@ -176,6 +182,7 @@ model User {
   paymentMethods      PaymentMethod[]
   notificationSetting NotificationSetting?
   teamInvitesSent     TeamInvite[]
+  teamMemberships     TeamMember[]
 
   createdShipments      Shipment[]              @relation("ShipmentCreator")
   customerShipments     Shipment[]              @relation("CustomerShipments")
@@ -215,6 +222,7 @@ model Company {
 
   documents         TrackingDocument[]
   users             User[]
+  teamMembers       TeamMember[]
   Warehouse         Warehouse[] // keep relation to warehouses
   InventoryLocation InventoryLocation[]
   slaSettings       SlaSetting[]
@@ -345,6 +353,23 @@ model TeamInvite {
 
   @@index([invitedById])
   @@index([companyId])
+}
+
+model TeamMember {
+  id        String         @id @default(cuid())
+  companyId String
+  userId    String?
+  email     String
+  role      TeamMemberRole @default(VIEWER)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([companyId, email])
+  @@index([companyId])
+  @@index([userId])
 }
 
 model Warehouse {

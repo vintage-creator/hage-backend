@@ -81,15 +81,53 @@ const documentRegistrationSchema = {
       companyCert: {
          type: 'string',
          format: 'binary',
-         description: 'Required PDF upload',
+         description: 'Required company registration certificate. PDF only, maximum 5MB.',
       },
       taxCert: {
          type: 'string',
          format: 'binary',
-         description: 'Required PDF upload',
+         description: 'Required tax clearance certificate. PDF only, maximum 5MB.',
       },
    },
 };
+
+const distributorRegistrationSchema = {
+   type: 'object',
+   required: ['kind', 'language', 'fullName', 'phoneNumber', 'emailAddress', 'businessName', 'businessAddress', 'companyCert', 'taxCert'],
+   properties: {
+      kind: { type: 'string', enum: ['DISTRIBUTOR'], example: 'DISTRIBUTOR' },
+      language: { type: 'string', example: 'en' },
+      fullName: { type: 'string', example: 'John Doe' },
+      phoneNumber: { type: 'string', example: '+2348010000000' },
+      emailAddress: { type: 'string', example: 'ops@example.com' },
+      businessName: { type: 'string', example: 'ACME Distribution Ltd' },
+      businessAddress: { type: 'string', example: '12 Port Road' },
+      companyCert: {
+         type: 'string',
+         format: 'binary',
+         description: 'Company registration certificate. PDF only, maximum 5MB.',
+      },
+      taxCert: {
+         type: 'string',
+         format: 'binary',
+         description: 'Tax clearance certificate. PDF only, maximum 5MB.',
+      },
+   },
+};
+
+const documentUploadInterceptor = FileFieldsInterceptor(
+   [
+      { name: 'companyCert', maxCount: 1 },
+      { name: 'taxCert', maxCount: 1 },
+   ],
+   {
+      storage: memoryStorage(),
+      fileFilter: pdfFileFilter,
+      limits: {
+         fileSize: 5 * 1024 * 1024,
+      },
+   },
+);
 
 const lastMileRegistrationSchema = {
    type: 'object',
@@ -176,6 +214,39 @@ export class AuthController {
       return this.auth.registerCompany(dto, {});
    }
 
+   @Post('register-distributor')
+   @ApiOperation({
+      summary: 'Register distributor user',
+      description:
+         'Creates a DISTRIBUTOR account. Upload company registration certificate and tax clearance certificate as PDF files only, maximum 5MB each. Verification is via email link; after the email link opens, the frontend should call set-password.',
+   })
+   @ApiConsumes('multipart/form-data')
+   @ApiBody({ schema: distributorRegistrationSchema })
+   @ApiResponse({
+      status: 201,
+      description: 'Registration accepted; verify with the email link.',
+   })
+   @UseInterceptors(documentUploadInterceptor)
+   async registerDistributor(
+      @Body() dto: RegisterCompanyDto,
+      @UploadedFiles()
+      files?: {
+         companyCert?: Express.Multer.File[];
+         taxCert?: Express.Multer.File[];
+      },
+   ) {
+      dto.kind = RegisterKind.DISTRIBUTOR;
+
+      if (!files || !files.companyCert?.[0] || !files.taxCert?.[0]) {
+         throw new BadRequestException('companyCert and taxCert PDF files are required (max 5MB each)');
+      }
+
+      return this.auth.registerCompany(dto, {
+         companyCert: files.companyCert[0],
+         taxCert: files.taxCert[0],
+      });
+   }
+
    @Post('register-company')
    @ApiOperation({
       summary: 'Register document-required user',
@@ -187,21 +258,7 @@ export class AuthController {
       status: 201,
       description: 'Registration accepted; verify with the email link.',
    })
-   @UseInterceptors(
-      FileFieldsInterceptor(
-         [
-            { name: 'companyCert', maxCount: 1 },
-            { name: 'taxCert', maxCount: 1 },
-         ],
-         {
-            storage: memoryStorage(),
-            fileFilter: pdfFileFilter,
-            limits: {
-               fileSize: 5 * 1024 * 1024,
-            },
-         },
-      ),
-   )
+   @UseInterceptors(documentUploadInterceptor)
    @ApiBody({
       schema: documentRegistrationSchema,
    })
