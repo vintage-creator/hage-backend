@@ -90,23 +90,46 @@ else
 fi
 
 #
-# 5. Apply pending migrations on EVERY boot (this is what keeps prod in sync).
-#    Uses committed migration files in prisma/migrations via `prisma migrate deploy`,
-#    which needs DIRECT_URL (the direct, non-pooled connection) — the pooled
-#    DATABASE_URL cannot run DDL. Never crashes the container: on failure we log and
-#    still start the API so the service stays available.
+# 5. Bring the schema up to date on EVERY boot via `prisma migrate deploy`,
+#    using the credentials this container was given (so it always targets the
+#    database the app itself uses). All DDL uses DIRECT_URL — the direct,
+#    non-pooled connection; the pooled DATABASE_URL cannot run DDL.
+#
+#    This database predates migrations (it was built with `db push`), so its
+#    existing tables have no migration history and the first `migrate deploy`
+#    fails with P3005. We detect that and adopt the database automatically,
+#    once: a non-destructive `db push` (NO --accept-data-loss, so it ABORTS
+#    rather than dropping data) repairs any additive drift — including the
+#    columns prod is currently missing — then we baseline `0_init` and re-run
+#    deploy. Never crashes the container: on any failure we log and start anyway.
 #
 echo "Applying database migrations (prisma migrate deploy)..."
-if timeout 120 npx prisma migrate deploy; then
+if DEPLOY_OUT=$(timeout 120 npx prisma migrate deploy 2>&1); then
+  echo "$DEPLOY_OUT"
   echo "Migrations applied (or already up to date)."
+elif echo "$DEPLOY_OUT" | grep -q "P3005"; then
+  echo "$DEPLOY_OUT"
+  echo "P3005: existing un-migrated database — adopting into Prisma migrations (one-time)..."
+  echo "  Repairing additive drift with 'prisma db push' (aborts if it would drop data)..."
+  if timeout 120 npx prisma db push --skip-generate; then
+    if timeout 60 npx prisma migrate resolve --applied 0_init; then
+      echo "  Baseline recorded; applying any remaining migrations..."
+      if timeout 120 npx prisma migrate deploy; then
+        echo "  Adoption complete — database is in sync."
+      else
+        echo "  WARNING: migrate deploy still failing after adoption. Continuing."
+      fi
+    else
+      echo "  WARNING: could not record baseline (0_init). Continuing."
+    fi
+  else
+    echo "  WARNING: 'db push' failed — destructive drift, or DIRECT_URL unset/unreachable."
+    echo "  Schema NOT changed. Continuing so the service stays up."
+  fi
 else
-  echo "WARNING: 'prisma migrate deploy' failed — schema changes were NOT applied."
-  echo "  Most common causes:"
-  echo "    1. DIRECT_URL not set. Migrations need the direct (non-pooled) connection."
-  echo "    2. An existing db-push database that was never baselined -> P3005."
-  echo "       Baseline it ONCE against that database, then redeploy:"
-  echo "         npx prisma migrate resolve --applied 0_init"
-  echo "  Continuing startup so the service stays up."
+  echo "$DEPLOY_OUT"
+  echo "WARNING: 'prisma migrate deploy' failed (not P3005) — schema NOT applied."
+  echo "  Check DIRECT_URL is the direct (non-pooled) connection. Continuing."
 fi
 
 #

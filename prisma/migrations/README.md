@@ -13,33 +13,33 @@ User.isAvailable does not exist`).
 npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script
 ```
 
-## One-time baselining of EXISTING databases (required — do this before the first deploy)
+## Adoption is automatic on first deploy
 
-An existing database already has all the tables, so `migrate deploy` would try to
-run `0_init` (all `CREATE TABLE`s) and fail with **`P3005` (schema not empty)**.
-Each existing database (production, and any shared dev DB) must be baselined once.
+An existing database already has all the tables but no migration history, so the
+first `migrate deploy` fails with **`P3005` (schema not empty)**. `scripts/startup.sh`
+handles this **automatically, once**, using the credentials App Runner injects (so it
+always targets the same database the app uses):
 
-Run these **from a machine that can reach the database**, with `DATABASE_URL` and
-`DIRECT_URL` in your environment pointing at **that** database:
+1. `prisma migrate deploy` → hits `P3005`.
+2. `prisma db push` (no `--accept-data-loss`, so it aborts rather than dropping data)
+   repairs additive drift — including the columns prod is currently missing.
+3. `prisma migrate resolve --applied 0_init` records the baseline.
+4. `prisma migrate deploy` again → now a no-op.
+
+So **just merging and deploying this branch fixes the current outage** — no manual DB
+access needed. A brand-new / empty database needs nothing special either: `migrate
+deploy` simply runs `0_init` and creates everything.
+
+### Manual fallback (only if the auto-adoption logs a warning)
+
+If startup logs show `db push` failed (e.g. destructive drift it refused to apply),
+baseline the database the **production service connects to** (`hage-mvp/prod/rds/master`
+secret) by hand, with `DATABASE_URL`/`DIRECT_URL` pointing at it:
 
 ```bash
-# 1. Make the database match the current schema first (additive; aborts if it would
-#    drop data). This also applies the columns prod is currently missing.
-npx prisma db push        # NO --accept-data-loss
-
-# 2. Record the baseline as already-applied so migrate deploy won't re-run it.
-npx prisma migrate resolve --applied 0_init
+npx prisma db push                            # inspect/repair; NO --accept-data-loss
+npx prisma migrate resolve --applied 0_init   # record baseline
 ```
-
-After this, `prisma migrate deploy` (on every boot) is a no-op until a NEW migration
-is added, and the current prod outage is resolved (step 1 adds the missing columns).
-
-> ⚠️ Baseline the database the **production App Runner service actually connects to**
-> (the value of the `hage-mvp/prod/rds/master` secret), not a local copy. If your
-> local `.env` points at a different DB, baselining that one will not fix prod.
-
-A brand-new / empty database needs **no** baselining — `migrate deploy` runs `0_init`
-and creates everything automatically.
 
 ## Making schema changes from now on
 
