@@ -339,6 +339,7 @@ jobs:
                 },
                 "RuntimeEnvironmentSecrets": {
                   "DATABASE_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/rds/master-xRcVlo:DATABASE_URL::",
+                  "DIRECT_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/rds/master-xRcVlo:DATABASE_URL::",
                   "JWT_SECRET": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/jwt-secret-oqoaaG",
                   "CLOUDINARY_CLOUD_NAME": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/cloudinary-credentials-ESKjAs:cloud_name::",
                   "CLOUDINARY_API_KEY": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/cloudinary-credentials-ESKjAs:api_key::",
@@ -617,6 +618,7 @@ jobs:
                 },
                 "RuntimeEnvironmentSecrets": {
                   "DATABASE_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/rds/master-xRcVlo:DATABASE_URL::",
+                  "DIRECT_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/rds/master-xRcVlo:DATABASE_URL::",
                   "JWT_SECRET": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/jwt-secret-VfHP6e",
                   "CLOUDINARY_CLOUD_NAME": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/cloudinary-credentials-rzQzW0:cloud_name::",
                   "CLOUDINARY_API_KEY": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/cloudinary-credentials-rzQzW0:api_key::",
@@ -788,6 +790,7 @@ jobs:
                 },
                 "RuntimeEnvironmentSecrets": {
                   "DATABASE_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/rds/master-xRcVlo:DATABASE_URL::",
+                  "DIRECT_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/rds/master-xRcVlo:DATABASE_URL::",
                   "JWT_SECRET": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/jwt-secret-oqoaaG",
                   "CLOUDINARY_CLOUD_NAME": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/cloudinary-credentials-ESKjAs:cloud_name::",
                   "CLOUDINARY_API_KEY": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/dev/cloudinary-credentials-ESKjAs:api_key::",
@@ -948,6 +951,7 @@ jobs:
                 },
                 "RuntimeEnvironmentSecrets": {
                   "DATABASE_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/rds/master-xRcVlo:DATABASE_URL::",
+                  "DIRECT_URL": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/rds/master-xRcVlo:DATABASE_URL::",
                   "JWT_SECRET": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/jwt-secret-VfHP6e",
                   "CLOUDINARY_CLOUD_NAME": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/cloudinary-credentials-rzQzW0:cloud_name::",
                   "CLOUDINARY_API_KEY": "arn:aws:secretsmanager:eu-west-2:283780611213:secret:hage-mvp/prod/cloudinary-credentials-rzQzW0:api_key::",

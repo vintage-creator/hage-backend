@@ -90,62 +90,52 @@ else
 fi
 
 #
-# 5. Initialize only if empty or FORCE=true
+# 5. Apply pending migrations on EVERY boot (this is what keeps prod in sync).
+#    Uses committed migration files in prisma/migrations via `prisma migrate deploy`,
+#    which needs DIRECT_URL (the direct, non-pooled connection) — the pooled
+#    DATABASE_URL cannot run DDL. Never crashes the container: on failure we log and
+#    still start the API so the service stays available.
 #
-if [ "$FORCE" = "true" ] || [ "$TABLE_COUNT" -eq 0 ]; then
-  echo "Running DB initialization..."
-
-  echo "Synchronizing database schema..."
-  # Skip migrations and go straight to db push to avoid P3005 errors
-  if timeout 60 npx prisma db push --accept-data-loss --skip-generate; then
-    echo "Database schema synchronized"
-  else
-    echo "WARNING: Database push failed or timed out, but continuing with startup"
-  fi
-
-  if [ "$ENABLE_SEEDING" = "true" ]; then
-    echo "Seeding enabled, checking if database needs seeding..."
-    
-    # Check if database has any user data (indicating it's already been seeded)
-    USER_COUNT=$(timeout 15 npx prisma db execute --url "$DATABASE_URL" --stdin <<'SQL' 2>/dev/null
-SELECT COUNT(*) FROM "User";
-SQL
-)
-    
-    USER_COUNT=$(echo "$USER_COUNT" | grep -Eo '[0-9]+' | tail -1 || echo "0")
-    if [ -z "$USER_COUNT" ]; then USER_COUNT=0; fi
-    
-    echo "User count: $USER_COUNT"
-    
-    if [ "$USER_COUNT" -eq 0 ]; then
-      echo "Database appears empty, running seed..."
-      if timeout 120 npx prisma db seed; then
-        echo "Seed completed successfully"
-        echo "Skipping seed verification to prevent startup delays"
-      else
-        echo "WARNING: Seed failed/timed out, continuing"
-      fi
-    else
-      echo "Database already contains data ($USER_COUNT users), skipping seed"
-    fi
-  else
-    echo "Seeding disabled (ENABLE_SEEDING=false)"
-    echo "For production: Run seeding manually if needed"
-    
-    # Show current data status for production verification
-    USER_COUNT=$(timeout 15 npx prisma db execute --url "$DATABASE_URL" --stdin <<'SQL' 2>/dev/null
-SELECT COUNT(*) FROM "User";
-SQL
-)
-    USER_COUNT=$(echo "$USER_COUNT" | grep -Eo '[0-9]+' | tail -1 || echo "0")
-    echo "Current user count: $USER_COUNT"
-  fi
+echo "Applying database migrations (prisma migrate deploy)..."
+if timeout 120 npx prisma migrate deploy; then
+  echo "Migrations applied (or already up to date)."
 else
-  echo "Existing DB detected ($TABLE_COUNT tables) — skipping migrations & seed"
+  echo "WARNING: 'prisma migrate deploy' failed — schema changes were NOT applied."
+  echo "  Most common causes:"
+  echo "    1. DIRECT_URL not set. Migrations need the direct (non-pooled) connection."
+  echo "    2. An existing db-push database that was never baselined -> P3005."
+  echo "       Baseline it ONCE against that database, then redeploy:"
+  echo "         npx prisma migrate resolve --applied 0_init"
+  echo "  Continuing startup so the service stays up."
 fi
 
 #
-# 6. Start the app
+# 6. Seed only on a first-time (userless) database.
+#
+if [ "$ENABLE_SEEDING" = "true" ]; then
+  USER_COUNT=$(timeout 15 npx prisma db execute --url "$DATABASE_URL" --stdin <<'SQL' 2>/dev/null
+SELECT COUNT(*) FROM "User";
+SQL
+)
+  USER_COUNT=$(echo "$USER_COUNT" | grep -Eo '[0-9]+' | tail -1 || echo "0")
+  if [ -z "$USER_COUNT" ]; then USER_COUNT=0; fi
+  echo "User count: $USER_COUNT"
+  if [ "$USER_COUNT" -eq 0 ]; then
+    echo "No users found, running seed..."
+    if timeout 120 npx prisma db seed; then
+      echo "Seed completed successfully"
+    else
+      echo "WARNING: Seed failed/timed out, continuing"
+    fi
+  else
+    echo "Database already contains data ($USER_COUNT users), skipping seed"
+  fi
+else
+  echo "Seeding disabled (ENABLE_SEEDING=false)"
+fi
+
+#
+# 7. Start the app
 #
 echo "Launching API..."
 
