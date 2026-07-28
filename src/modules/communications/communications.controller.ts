@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CommunicationsService } from './communications.service';
-import { SendShipmentMessageDto, StartShipmentCallDto, UpdateShipmentCallDto } from './dto/communications.dto';
+import { SendShipmentMessageDto, StartShipmentCallDto, UpdateShipmentCallDto, UpdateShipmentMessageDto } from './dto/communications.dto';
 
 @ApiTags('communications')
 @Controller('communications')
@@ -47,6 +47,22 @@ export class CommunicationsController {
    @ApiResponse({ status: 201, description: 'Message sent' })
    sendMessage(@Param('shipmentId') shipmentId: string, @Req() req: Request, @Body() dto: SendShipmentMessageDto) {
       return this.communications.sendMessage(shipmentId, this.userId(req), dto);
+   }
+
+   @Patch('shipments/:shipmentId/messages/:messageId')
+   @ApiOperation({ summary: 'Edit a shipment message' })
+   @ApiParam({ name: 'shipmentId', description: 'Shipment ID' })
+   @ApiParam({ name: 'messageId', description: 'Message ID' })
+   updateMessage(@Param('shipmentId') shipmentId: string, @Param('messageId') messageId: string, @Req() req: Request, @Body() dto: UpdateShipmentMessageDto) {
+      return this.communications.updateMessage(shipmentId, messageId, this.userId(req), dto);
+   }
+
+   @Delete('shipments/:shipmentId/messages/:messageId')
+   @ApiOperation({ summary: 'Delete a shipment message' })
+   @ApiParam({ name: 'shipmentId', description: 'Shipment ID' })
+   @ApiParam({ name: 'messageId', description: 'Message ID' })
+   deleteMessage(@Param('shipmentId') shipmentId: string, @Param('messageId') messageId: string, @Req() req: Request) {
+      return this.communications.deleteMessage(shipmentId, messageId, this.userId(req));
    }
 
    @Patch('shipments/:shipmentId/messages/read')

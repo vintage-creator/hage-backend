@@ -9,6 +9,14 @@ export class SendShipmentMessageDto {
    body!: string;
 }
 
+export class UpdateShipmentMessageDto {
+   @ApiProperty({ example: 'Hello, can you share the latest delivery update?' })
+   @IsString()
+   @MinLength(1)
+   @MaxLength(2000)
+   body!: string;
+}
+
 export enum CallStatusDto {
    REQUESTED = 'REQUESTED',
    RINGING = 'RINGING',

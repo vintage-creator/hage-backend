@@ -1,10 +1,20 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { SettingsService } from './settings.service';
 import { CreateSlaDto } from './dto/create-sla.dto';
-import { InviteTeamMemberDto, LanguageSettingDto, NotificationSettingsDto, PaymentMethodDto, ReportIssueDto, UpdateEndUserProfileDto, UpdateEnterpriseProfileDto } from './dto/settings.dto';
+import {
+   InviteTeamMemberDto,
+   LanguageSettingDto,
+   NotificationSettingsDto,
+   PaymentMethodDto,
+   ReportIssueDto,
+   TeamInviteStatusQueryDto,
+   UpdateEndUserProfileDto,
+   UpdateEnterpriseProfileDto,
+   UpdateTeamInviteDto,
+} from './dto/settings.dto';
 
 @ApiTags('settings')
 @Controller('settings')
@@ -88,6 +98,33 @@ export class SettingsController {
    @ApiOperation({ summary: 'Invite team member by email' })
    inviteTeamMember(@Req() req: Request, @Body() dto: InviteTeamMemberDto) {
       return this.settings.inviteTeamMember(this.userId(req), dto);
+   }
+
+   @Get('team/invites')
+   @ApiOperation({
+      summary: 'List team invites',
+      description: 'Enterprise users can fetch all invited team members, optionally filtered by PENDING, ACCEPTED, DECLINED, or CANCELLED.',
+   })
+   listTeamInvites(@Req() req: Request, @Query() query: TeamInviteStatusQueryDto) {
+      return this.settings.listTeamInvites(this.userId(req), query.status);
+   }
+
+   @Get('team/invites/pending')
+   @ApiOperation({ summary: 'List invited team members who have not accepted yet' })
+   listPendingTeamInvites(@Req() req: Request) {
+      return this.settings.listTeamInvites(this.userId(req), 'PENDING');
+   }
+
+   @Get('team/invites/accepted')
+   @ApiOperation({ summary: 'List team members who have accepted the invite' })
+   listAcceptedTeamInvites(@Req() req: Request) {
+      return this.settings.listAcceptedTeamInvites(this.userId(req));
+   }
+
+   @Patch('team/invites/:id')
+   @ApiOperation({ summary: 'Update team invite status' })
+   updateTeamInvite(@Req() req: Request, @Param('id') id: string, @Body() dto: UpdateTeamInviteDto) {
+      return this.settings.updateTeamInvite(this.userId(req), id, dto);
    }
 
    @Patch('enterprise/profile')

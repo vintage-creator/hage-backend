@@ -8,8 +8,10 @@ import {
    PaymentMethodDto,
    PaymentMethodInputType,
    ReportIssueDto,
+   TeamInviteStatusDto,
    UpdateEndUserProfileDto,
    UpdateEnterpriseProfileDto,
+   UpdateTeamInviteDto,
 } from './dto/settings.dto';
 
 @Injectable()
@@ -41,6 +43,13 @@ export class SettingsService {
       });
 
       if (existingUser) throw new BadRequestException('Email is already registered');
+   }
+
+   private async ensureEnterpriseTeamManager(userId: string) {
+      const user = await this.getUser(userId);
+      if (user.kind !== 'ENTERPRISE') throw new ForbiddenException('Team management is only available to enterprise users');
+      if (!user.companyId) throw new BadRequestException('Enterprise company profile is required');
+      return user;
    }
 
    async createEnterpriseSla(userId: string, dto: CreateSlaDto) {
@@ -202,14 +211,76 @@ export class SettingsService {
    }
 
    async inviteTeamMember(userId: string, dto: InviteTeamMemberDto) {
-      const user = await this.getUser(userId);
-      if (user.kind !== 'ENTERPRISE') throw new ForbiddenException('Team management is only available to enterprise users');
+      const user = await this.ensureEnterpriseTeamManager(userId);
       return this.prisma.teamInvite.create({
          data: {
             invitedById: userId,
             companyId: user.companyId,
             email: dto.email,
          },
+      });
+   }
+
+   private async withAcceptedUser(invite: { email: string }) {
+      return this.prisma.user.findFirst({
+         where: {
+            email: { equals: invite.email, mode: 'insensitive' },
+            isVerified: true,
+         },
+         select: {
+            id: true,
+            email: true,
+            phone: true,
+            kind: true,
+            company: { select: { fullName: true, businessName: true, emailAddress: true } },
+            createdAt: true,
+         },
+      });
+   }
+
+   async listTeamInvites(userId: string, status?: TeamInviteStatusDto | string) {
+      const user = await this.ensureEnterpriseTeamManager(userId);
+      const invites = await this.prisma.teamInvite.findMany({
+         where: {
+            companyId: user.companyId,
+            ...(status ? { status } : {}),
+         },
+         orderBy: { createdAt: 'desc' },
+      });
+
+      const enriched = await Promise.all(
+         invites.map(async (invite) => {
+            const acceptedUser = await this.withAcceptedUser(invite);
+            return {
+               ...invite,
+               hasAcceptedAccount: Boolean(acceptedUser),
+               acceptedUser,
+            };
+         }),
+      );
+
+      return enriched;
+   }
+
+   async listAcceptedTeamInvites(userId: string) {
+      const invites = await this.listTeamInvites(userId);
+      return invites.filter((invite) => invite.status === TeamInviteStatusDto.ACCEPTED || invite.hasAcceptedAccount);
+   }
+
+   async updateTeamInvite(userId: string, id: string, dto: UpdateTeamInviteDto) {
+      const user = await this.ensureEnterpriseTeamManager(userId);
+      const invite = await this.prisma.teamInvite.findFirst({
+         where: {
+            id,
+            companyId: user.companyId,
+         },
+      });
+
+      if (!invite) throw new NotFoundException('Team invite not found');
+
+      return this.prisma.teamInvite.update({
+         where: { id },
+         data: { status: dto.status },
       });
    }
 
