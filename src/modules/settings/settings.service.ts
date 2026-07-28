@@ -9,8 +9,10 @@ import {
    PaymentMethodInputType,
    ReportIssueDto,
    TeamInviteStatusDto,
+   TeamMemberRoleDto,
    UpdateEndUserProfileDto,
    UpdateEnterpriseProfileDto,
+   UpdateTeamMemberRoleDto,
    UpdateTeamInviteDto,
 } from './dto/settings.dto';
 
@@ -212,12 +214,46 @@ export class SettingsService {
 
    async inviteTeamMember(userId: string, dto: InviteTeamMemberDto) {
       const user = await this.ensureEnterpriseTeamManager(userId);
-      return this.prisma.teamInvite.create({
-         data: {
-            invitedById: userId,
-            companyId: user.companyId,
-            email: dto.email,
-         },
+      const email = dto.email.trim();
+      const role = dto.role ?? TeamMemberRoleDto.VIEWER;
+
+      return this.prisma.$transaction(async (tx) => {
+         const invite = await tx.teamInvite.create({
+            data: {
+               invitedById: userId,
+               companyId: user.companyId,
+               email,
+            },
+         });
+
+         const acceptedUser = await tx.user.findFirst({
+            where: {
+               email: { equals: email, mode: 'insensitive' },
+               isVerified: true,
+            },
+            select: { id: true },
+         });
+
+         const member = await tx.teamMember.upsert({
+            where: {
+               companyId_email: {
+                  companyId: user.companyId!,
+                  email,
+               },
+            },
+            create: {
+               companyId: user.companyId!,
+               email,
+               role,
+               userId: acceptedUser?.id,
+            },
+            update: {
+               role,
+               userId: acceptedUser?.id,
+            },
+         });
+
+         return { invite, member };
       });
    }
 
@@ -240,6 +276,7 @@ export class SettingsService {
 
    async listTeamInvites(userId: string, status?: TeamInviteStatusDto | string) {
       const user = await this.ensureEnterpriseTeamManager(userId);
+      await this.syncTeamMembersFromInvites(user.companyId!);
       const invites = await this.prisma.teamInvite.findMany({
          where: {
             companyId: user.companyId,
@@ -262,11 +299,6 @@ export class SettingsService {
       return enriched;
    }
 
-   async listAcceptedTeamInvites(userId: string) {
-      const invites = await this.listTeamInvites(userId);
-      return invites.filter((invite) => invite.status === TeamInviteStatusDto.ACCEPTED || invite.hasAcceptedAccount);
-   }
-
    async updateTeamInvite(userId: string, id: string, dto: UpdateTeamInviteDto) {
       const user = await this.ensureEnterpriseTeamManager(userId);
       const invite = await this.prisma.teamInvite.findFirst({
@@ -278,10 +310,159 @@ export class SettingsService {
 
       if (!invite) throw new NotFoundException('Team invite not found');
 
-      return this.prisma.teamInvite.update({
-         where: { id },
-         data: { status: dto.status },
+      return this.prisma.$transaction(async (tx) => {
+         const updatedInvite = await tx.teamInvite.update({
+            where: { id },
+            data: { status: dto.status },
+         });
+
+         const acceptedUser = await tx.user.findFirst({
+            where: {
+               email: { equals: invite.email, mode: 'insensitive' },
+               isVerified: true,
+            },
+            select: { id: true },
+         });
+
+         if (dto.status === TeamInviteStatusDto.ACCEPTED) {
+            await tx.teamMember.upsert({
+               where: {
+                  companyId_email: {
+                     companyId: user.companyId!,
+                     email: invite.email,
+                  },
+               },
+               create: {
+                  companyId: user.companyId!,
+                  email: invite.email,
+                  userId: acceptedUser?.id,
+                  role: TeamMemberRoleDto.VIEWER,
+               },
+               update: {
+                  userId: acceptedUser?.id,
+               },
+            });
+         }
+
+         if (dto.status === TeamInviteStatusDto.CANCELLED || dto.status === TeamInviteStatusDto.DECLINED) {
+            await tx.teamMember.deleteMany({
+               where: {
+                  companyId: user.companyId!,
+                  email: invite.email,
+               },
+            });
+         }
+
+         return updatedInvite;
       });
+   }
+
+   private async syncTeamMembersFromInvites(companyId: string) {
+      const invites = await this.prisma.teamInvite.findMany({ where: { companyId } });
+      await Promise.all(
+         invites.map(async (invite) => {
+            if (invite.status === TeamInviteStatusDto.CANCELLED || invite.status === TeamInviteStatusDto.DECLINED) return;
+            const acceptedUser = await this.withAcceptedUser(invite);
+            await this.prisma.teamMember.upsert({
+               where: {
+                  companyId_email: {
+                     companyId,
+                     email: invite.email,
+                  },
+               },
+               create: {
+                  companyId,
+                  email: invite.email,
+                  role: TeamMemberRoleDto.VIEWER,
+                  userId: acceptedUser?.id,
+               },
+               update: {
+                  userId: acceptedUser?.id,
+               },
+            });
+         }),
+      );
+   }
+
+   async listTeamMembers(userId: string) {
+      const user = await this.ensureEnterpriseTeamManager(userId);
+      const companyId = user.companyId!;
+      await this.syncTeamMembersFromInvites(companyId);
+
+      const members = await this.prisma.teamMember.findMany({
+         where: { companyId },
+         orderBy: { createdAt: 'desc' },
+         include: {
+            user: {
+               select: {
+                  id: true,
+                  email: true,
+                  phone: true,
+                  kind: true,
+                  isVerified: true,
+                  company: { select: { fullName: true, businessName: true, emailAddress: true } },
+               },
+            },
+         },
+      });
+
+      const invites = await this.prisma.teamInvite.findMany({
+         where: { companyId },
+         orderBy: { createdAt: 'desc' },
+      });
+
+      return members.map((member: any) => {
+         const invite = invites.find((item) => item.email.toLowerCase() === member.email.toLowerCase());
+         return {
+            ...member,
+            inviteStatus: invite?.status ?? (member.user?.isVerified ? TeamInviteStatusDto.ACCEPTED : TeamInviteStatusDto.PENDING),
+            invite,
+         };
+      });
+   }
+
+   async updateTeamMemberRole(userId: string, id: string, dto: UpdateTeamMemberRoleDto) {
+      const user = await this.ensureEnterpriseTeamManager(userId);
+      const companyId = user.companyId!;
+      const member = await this.prisma.teamMember.findFirst({
+         where: {
+            id,
+            companyId,
+         },
+      });
+
+      if (!member) throw new NotFoundException('Team member not found');
+
+      return this.prisma.teamMember.update({
+         where: { id },
+         data: { role: dto.role },
+      });
+   }
+
+   async removeTeamMember(userId: string, id: string) {
+      const user = await this.ensureEnterpriseTeamManager(userId);
+      const companyId = user.companyId!;
+      const member = await this.prisma.teamMember.findFirst({
+         where: {
+            id,
+            companyId,
+         },
+      });
+
+      if (!member) throw new NotFoundException('Team member not found');
+
+      await this.prisma.$transaction([
+         this.prisma.teamMember.delete({ where: { id: member.id } }),
+         this.prisma.teamInvite.updateMany({
+            where: {
+               companyId,
+               email: member.email,
+            },
+            data: { status: TeamInviteStatusDto.CANCELLED },
+         }),
+      ]);
+
+      return { ok: true, message: 'Team member removed' };
    }
 
    async updateEnterpriseProfile(userId: string, dto: UpdateEnterpriseProfileDto) {

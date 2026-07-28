@@ -11,6 +11,7 @@ import {
    PaymentMethodDto,
    ReportIssueDto,
    TeamInviteStatusQueryDto,
+   UpdateTeamMemberRoleDto,
    UpdateEndUserProfileDto,
    UpdateEnterpriseProfileDto,
    UpdateTeamInviteDto,
@@ -109,22 +110,28 @@ export class SettingsController {
       return this.settings.listTeamInvites(this.userId(req), query.status);
    }
 
-   @Get('team/invites/pending')
-   @ApiOperation({ summary: 'List invited team members who have not accepted yet' })
-   listPendingTeamInvites(@Req() req: Request) {
-      return this.settings.listTeamInvites(this.userId(req), 'PENDING');
-   }
-
-   @Get('team/invites/accepted')
-   @ApiOperation({ summary: 'List team members who have accepted the invite' })
-   listAcceptedTeamInvites(@Req() req: Request) {
-      return this.settings.listAcceptedTeamInvites(this.userId(req));
-   }
-
    @Patch('team/invites/:id')
    @ApiOperation({ summary: 'Update team invite status' })
    updateTeamInvite(@Req() req: Request, @Param('id') id: string, @Body() dto: UpdateTeamInviteDto) {
       return this.settings.updateTeamInvite(this.userId(req), id, dto);
+   }
+
+   @Get('team/members')
+   @ApiOperation({ summary: 'List team members' })
+   listTeamMembers(@Req() req: Request) {
+      return this.settings.listTeamMembers(this.userId(req));
+   }
+
+   @Patch('team/members/:id/role')
+   @ApiOperation({ summary: 'Update team member role' })
+   updateTeamMemberRole(@Req() req: Request, @Param('id') id: string, @Body() dto: UpdateTeamMemberRoleDto) {
+      return this.settings.updateTeamMemberRole(this.userId(req), id, dto);
+   }
+
+   @Delete('team/members/:id')
+   @ApiOperation({ summary: 'Remove team member' })
+   removeTeamMember(@Req() req: Request, @Param('id') id: string) {
+      return this.settings.removeTeamMember(this.userId(req), id);
    }
 
    @Patch('enterprise/profile')

@@ -114,6 +114,17 @@ export class InviteTeamMemberDto {
    @ApiProperty({ example: 'teammate@example.com' })
    @IsEmail()
    email!: string;
+
+   @ApiPropertyOptional({ enum: ['ADMIN', 'MANAGER', 'VIEWER'], example: 'VIEWER' })
+   @IsOptional()
+   @IsEnum(['ADMIN', 'MANAGER', 'VIEWER'])
+   role?: 'ADMIN' | 'MANAGER' | 'VIEWER';
+}
+
+export enum TeamMemberRoleDto {
+   ADMIN = 'ADMIN',
+   MANAGER = 'MANAGER',
+   VIEWER = 'VIEWER',
 }
 
 export enum TeamInviteStatusDto {
@@ -134,6 +145,12 @@ export class UpdateTeamInviteDto {
    @ApiProperty({ enum: TeamInviteStatusDto, example: TeamInviteStatusDto.ACCEPTED })
    @IsEnum(TeamInviteStatusDto)
    status!: TeamInviteStatusDto;
+}
+
+export class UpdateTeamMemberRoleDto {
+   @ApiProperty({ enum: TeamMemberRoleDto, example: TeamMemberRoleDto.MANAGER })
+   @IsEnum(TeamMemberRoleDto)
+   role!: TeamMemberRoleDto;
 }
 
 export class UpdateEnterpriseProfileDto {
