@@ -115,7 +115,7 @@ export class CreateShipmentDto {
    @Min(0)
    @Type(() => Number)
    @IsOptional()
-   shippingCost?: string;
+   shippingCost?: number;
 
    @ApiPropertyOptional()
    @IsNumber()
