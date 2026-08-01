@@ -18,18 +18,42 @@ export class TransportersController {
       return user?.sub ?? user?.id;
    }
 
-   // ✅ ADD TRANSPORTER (send invite) — "Add Transporter" screen
-   @Post()
+   // ✅ ADD NEW TRANSPORTER — "Add New" tab. The transporter is NOT on the
+   // platform yet, so we save the entry and email them an invite to sign up.
+   // (If it turns out the email actually already belongs to an eligible
+   // transporter account, we link it immediately instead of sending a signup
+   // invite, so nobody gets a confusing "come join" email for an account they
+   // already have.)
+   @Post('new')
    @ApiOperation({
-      summary: 'Add / invite a transporter',
-      description: 'Saves a transporter to the enterprise address book and sends an invite email. If a matching transporter account already exists, it is linked immediately.',
+      summary: 'Add a new (unregistered) transporter',
+      description:
+         "Saves a transporter to the enterprise address book and emails them an invite to create a Hage transporter account. If the email already belongs to a registered, eligible transporter, it is linked immediately and a lightweight notification is sent instead of a signup invite.",
    })
-   @ApiResponse({ status: 201, description: 'Transporter saved and invite sent' })
-   addTransporter(@Req() req: Request, @Body() dto: AddTransporterDto) {
-      return this.svc.addTransporter(this.userId(req), dto);
+   @ApiResponse({ status: 201, description: 'Transporter saved and invite email sent' })
+   addNewTransporter(@Req() req: Request, @Body() dto: AddTransporterDto) {
+      return this.svc.addNewTransporter(this.userId(req), dto);
+   }
+
+   // ✅ ADD EXISTING TRANSPORTER — "Add Existing" tab. The transporter IS
+   // already a registered user on the platform, identified by the same
+   // name/phone/email fields. We look them up and link immediately — no
+   // signup invite is sent, only a short "you've been added" email.
+   @Post('existing')
+   @ApiOperation({
+      summary: 'Add an existing (already registered) transporter',
+      description:
+         'Looks up a registered, eligible transporter account by the email provided and links it to the enterprise address book right away. Fails with a 400 if no matching registered transporter account is found — use "Add New" to invite that person instead.',
+   })
+   @ApiResponse({ status: 201, description: 'Existing transporter linked and notified' })
+   @ApiResponse({ status: 400, description: 'No matching registered transporter account found for this email' })
+   addExistingTransporter(@Req() req: Request, @Body() dto: AddTransporterDto) {
+      return this.svc.addExistingTransporter(this.userId(req), dto);
    }
 
    // ✅ SAVED TRANSPORTERS LIST — "Saved Transporter" screen
+   // NOTE: this must stay below the literal 'new'/'existing' routes above,
+   // otherwise Nest would try to match them against the ':id' route below.
    @Get()
    @ApiOperation({ summary: 'List saved transporters', description: 'Returns every transporter this account has added, most recent first.' })
    listSavedTransporters(@Req() req: Request) {

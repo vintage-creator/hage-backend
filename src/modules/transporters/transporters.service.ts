@@ -31,8 +31,8 @@ export class TransportersService {
       return isEligible ? user : null;
    }
 
-   // ─── ADD TRANSPORTER (send invite) ─────────────────────────────────────────
-   async addTransporter(ownerId: string, dto: AddTransporterDto) {
+   // ─── shared setup for both "add" flows ─────────────────────────────────────
+   private async prepareAdd(ownerId: string, dto: AddTransporterDto) {
       const owner = await this.prisma.user.findUnique({ where: { id: ownerId }, include: { company: true } });
       if (!owner) throw new NotFoundException('User not found');
 
@@ -46,6 +46,17 @@ export class TransportersService {
          throw new BadRequestException('You already added a transporter with this email');
       }
 
+      const inviterName = owner.company?.businessName ?? owner.company?.fullName ?? 'A Hage enterprise partner';
+      return { owner, email, countryCode, inviterName };
+   }
+
+   // ─── ADD NEW TRANSPORTER (not yet on the platform → email invite) ─────────
+   async addNewTransporter(ownerId: string, dto: AddTransporterDto) {
+      const { email, countryCode, inviterName } = await this.prepareAdd(ownerId, dto);
+
+      // Safety net: if this email actually already belongs to an eligible,
+      // registered transporter, link it instead of sending a "join Hage"
+      // invite to someone who already has an account.
       const matchedUser = await this.findMatchingTransporterAccount(email);
 
       const saved = await this.prisma.savedTransporter.create({
@@ -63,17 +74,58 @@ export class TransportersService {
       try {
          await this.mailer.sendTransporterInvite(email, {
             transporterName: dto.name,
-            inviterName: owner.company?.businessName ?? owner.company?.fullName ?? 'A Hage enterprise partner',
+            inviterName,
             alreadyRegistered: !!matchedUser,
             signupUrl: this.urlService.build('register-company'),
+            dashboardUrl: this.urlService.build('dashboard'),
          });
       } catch (err: any) {
          this.logger.warn(`Failed to send transporter invite email: ${err?.message ?? err}`);
       }
 
       if (matchedUser) {
-         await this.notify(matchedUser.id, `${owner.company?.businessName ?? 'An enterprise'} added you as a saved transporter`);
+         await this.notify(matchedUser.id, `${inviterName} added you as a saved transporter`);
       }
+
+      return saved;
+   }
+
+   // ─── ADD EXISTING TRANSPORTER (already a registered platform user) ────────
+   async addExistingTransporter(ownerId: string, dto: AddTransporterDto) {
+      const { email, countryCode, inviterName } = await this.prepareAdd(ownerId, dto);
+
+      const matchedUser = await this.findMatchingTransporterAccount(email);
+      if (!matchedUser) {
+         throw new BadRequestException('No registered transporter account was found with this email. Use "Add New" to invite them to Hage instead.');
+      }
+
+      const saved = await this.prisma.savedTransporter.create({
+         data: {
+            ownerId,
+            name: dto.name,
+            countryCode,
+            phone: dto.phone,
+            email,
+            transporterId: matchedUser.id,
+            status: 'ACTIVE',
+         },
+      });
+
+      try {
+         // Existing platform users never get a "create an account" invite —
+         // just a short heads-up that they've been linked.
+         await this.mailer.sendTransporterInvite(email, {
+            transporterName: dto.name,
+            inviterName,
+            alreadyRegistered: true,
+            signupUrl: this.urlService.build('register-company'),
+            dashboardUrl: this.urlService.build('dashboard'),
+         });
+      } catch (err: any) {
+         this.logger.warn(`Failed to send transporter-added email: ${err?.message ?? err}`);
+      }
+
+      await this.notify(matchedUser.id, `${inviterName} added you as a saved transporter`);
 
       return saved;
    }

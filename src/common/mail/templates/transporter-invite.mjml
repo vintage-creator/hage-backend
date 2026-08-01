@@ -8,9 +8,14 @@
 
     <mj-style inline="inline">
       .logo-img { border-radius: 6px; display: block; }
+      .break-word { word-break: break-all; }
     </mj-style>
 
-    <mj-preview>You've been added as a transporter on Hage</mj-preview>
+    {{#if alreadyRegistered}}
+    <mj-preview>{{inviterName}} added you as a transporter — it's already linked to your account</mj-preview>
+    {{else}}
+    <mj-preview>{{inviterName}} invited you to join {{appName}} as a transporter</mj-preview>
+    {{/if}}
   </mj-head>
 
   <mj-body background-color="#F5F7FA">
@@ -20,26 +25,47 @@
       </mj-column>
     </mj-section>
 
-    <mj-section background-color="#ffffff" padding="24px" border-radius="8px" css-class="card">
+    <mj-section background-color="#ffffff" padding="28px 24px 24px 24px" border-radius="8px" css-class="card">
       <mj-column>
-        <mj-text font-size="20px" font-weight="700" color="#111827">
+        {{#if alreadyRegistered}}
+        <mj-text align="left" padding-bottom="4px">
+          <span style="display:inline-block; background-color:#E7F8EE; color:#1E8449; font-size:12px; font-weight:700; letter-spacing:0.3px; border-radius:999px; padding:4px 12px;">ACCOUNT LINKED</span>
+        </mj-text>
+        {{else}}
+        <mj-text align="left" padding-bottom="4px">
+          <span style="display:inline-block; background-color:#FFF4E5; color:#B45309; font-size:12px; font-weight:700; letter-spacing:0.3px; border-radius:999px; padding:4px 12px;">TRANSPORTER INVITE</span>
+        </mj-text>
+        {{/if}}
+
+        <mj-text font-size="20px" font-weight="700" color="#111827" padding-top="10px">
           Hi {{transporterName}},
         </mj-text>
 
-        <mj-text font-size="16px" color="#374151" padding-top="8px" line-height="1.4">
-          {{inviterName}} has added you as a transporter on {{appName}}.
+        <mj-text font-size="16px" color="#374151" padding-top="8px" line-height="1.5">
           {{#if alreadyRegistered}}
-          Your existing transporter account has been linked, so shipment requests from {{inviterName}} will now show up on your dashboard for you to accept or reject.
+          <strong>{{inviterName}}</strong> added you as a transporter on {{appName}}. Since you already have a transporter account, it's been linked automatically — shipment requests from {{inviterName}} will now show up on your dashboard for you to accept or reject.
           {{else}}
-          To start receiving and accepting shipment requests from {{inviterName}}, create your transporter account below.
+          <strong>{{inviterName}}</strong> wants to work with you on {{appName}} and has added you as one of their transporters. You'll need a free transporter account to start receiving and accepting their shipment requests — it only takes a couple of minutes to set up.
           {{/if}}
         </mj-text>
 
-        {{#unless alreadyRegistered}}
-        <mj-button mj-class="btn" href="{{signupUrl}}" target="_blank" padding-top="18px">
+        {{#if alreadyRegistered}}
+        <mj-button mj-class="btn" href="{{dashboardUrl}}" target="_blank" padding-top="20px">
+          View your dashboard
+        </mj-button>
+        {{else}}
+        <mj-button mj-class="btn" href="{{signupUrl}}" target="_blank" padding-top="20px">
           Create your transporter account
         </mj-button>
-        {{/unless}}
+
+        <mj-text color="#6B7280" font-size="13px" padding-top="16px">
+          If the button doesn't work, copy and paste this link into your browser:
+        </mj-text>
+
+        <mj-text font-size="12px" color="#3A8156">
+          <span class="break-word">{{signupUrl}}</span>
+        </mj-text>
+        {{/if}}
 
         <mj-divider border-color="#E5E7EB" padding="20px 0" />
 
