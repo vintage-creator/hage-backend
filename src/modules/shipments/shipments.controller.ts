@@ -88,6 +88,8 @@ export class ShipmentsController {
             baseFrieght: { type: 'number' },
             handlingFee: { type: 'number' },
             insuranceFee: { type: 'number' },
+            shoppingCost: { type: 'number' },
+            tonnage: { type: 'string' },
             transactionFee: { type: 'number' },
             transporterId: { type: 'string', description: 'Pre-select a transporter (PRIVATE/ASSIGNED only)' },
             documents: { type: 'array', items: { type: 'string', format: 'binary' } },
