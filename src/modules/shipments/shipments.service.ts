@@ -296,7 +296,7 @@ export class ShipmentsService {
 
    // ─────────────────────────────────────────────────────────────────────────
    // LSP SELF-ASSIGN AS TRANSPORTER
-   // For CROSS_BORDER shipments, the LSP that created the shipment can act as
+   // For any shipment (INLAND or CROSS_BORDER), the LSP that created it can act as
    // its own transporter instead of assigning a third party. Only eligible for
    // LSP accounts whose Company.role is TRANSPORTER (see isTransporterAccount).
    // ─────────────────────────────────────────────────────────────────────────
@@ -313,10 +313,6 @@ export class ShipmentsService {
 
       if (shipment.createdBy !== lspUserId) {
          throw new ForbiddenException('You can only self-assign as transporter on shipments you created');
-      }
-
-      if (shipment.shipmentType !== 'CROSS_BORDER') {
-         throw new BadRequestException('Self-assignment as transporter only applies to cross-border shipments');
       }
 
       if (shipment.assignedTransporterId && shipment.assignedTransporterId !== lspUserId) {

@@ -169,7 +169,7 @@ export class ShipmentsController {
       return this.svc.acceptAndAssign(shipmentId, dto, userId);
    }
 
-   // ✅ LSP SELF-ASSIGNS AS TRANSPORTER (cross-border shipments they created)
+   // ✅ LSP SELF-ASSIGNS AS TRANSPORTER (shipments they created — INLAND or CROSS_BORDER)
    @Patch(':id/self-assign-transporter')
    @UseGuards(JwtAuthGuard, RolesGuard)
    @Roles('LOGISTIC_SERVICE_PROVIDER')
@@ -178,10 +178,10 @@ export class ShipmentsController {
    @ApiOperation({
       summary: 'LSP self-assigns as the shipment transporter',
       description:
-         'Allows a Logistic Service Provider whose company role is TRANSPORTER to assign themselves as the transporter on their own shipment, instead of assigning a third-party transporter. Only applies to CROSS_BORDER shipments created by the calling LSP.',
+         'Allows a Logistic Service Provider whose company role is TRANSPORTER to assign themselves as the transporter on their own shipment, instead of assigning a third-party transporter. Applies to shipments (INLAND or CROSS_BORDER) created by the calling LSP.',
    })
    @ApiResponse({ status: 200, description: 'LSP successfully assigned as the shipment transporter' })
-   @ApiResponse({ status: 400, description: 'Not a cross-border shipment, already assigned to a different transporter, or not in a self-assignable state' })
+   @ApiResponse({ status: 400, description: 'Already assigned to a different transporter, or shipment not in a self-assignable state' })
    @ApiResponse({ status: 403, description: 'Not an eligible LSP/transporter account, or not the shipment creator' })
    async selfAssignTransporter(@Param('id') shipmentId: string, @Req() req: Request) {
       const userId = (req.user as any)?.id;
