@@ -1,10 +1,11 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { TransportersService } from './transporters.service';
 import { AddTransporterDto } from './dto/add-transporter.dto';
 import { UpdateTransporterDto } from './dto/update-transporter.dto';
+import { ListLspTransportersDto } from './dto/list-lsp-transporters.dto';
 
 @ApiTags('transporters')
 @Controller('transporters')
@@ -58,6 +59,21 @@ export class TransportersController {
    @ApiOperation({ summary: 'List saved transporters', description: 'Returns every transporter this account has added, most recent first.' })
    listSavedTransporters(@Req() req: Request) {
       return this.svc.listSavedTransporters(this.userId(req));
+   }
+
+   // ✅ LSP-AS-TRANSPORTER DIRECTORY — lets a user browse and pick an LSP that
+   // operates as a transporter (Company.role = TRANSPORTER) when creating or
+   // assigning a shipment, most relevant for CROSS_BORDER shipments.
+   // NOTE: must also stay above the ':id' route below for the same reason.
+   @Get('lsp-transporters')
+   @ApiOperation({
+      summary: 'List LSP accounts eligible to act as a transporter',
+      description:
+         'Returns Logistic Service Provider accounts whose company role is TRANSPORTER — i.e. LSPs that can be selected as the transporter (transporterId) on a shipment instead of a third-party driver. Supports search by business name, filtering by country, and pagination.',
+   })
+   @ApiResponse({ status: 200, description: 'LSP-as-transporter accounts retrieved successfully' })
+   listLspTransporters(@Query() filters: ListLspTransportersDto) {
+      return this.svc.listLspTransporters(filters);
    }
 
    @Get(':id')

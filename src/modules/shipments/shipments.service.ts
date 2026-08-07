@@ -103,11 +103,13 @@ export class ShipmentsService {
    // ─────────────────────────────────────────────────────────────────────────
    async create(dto: CreateShipmentDto, userId: string, files?: Express.Multer.File[]): Promise<Shipment> {
       try {
-         // If a specific transporter is pre-selected, verify they exist
+         // If a specific transporter is pre-selected, verify they exist and are
+         // eligible to act as a transporter (a LAST_MILE_DELIVERY driver, or an
+         // LSP account whose Company.role is TRANSPORTER — see isTransporterAccount).
          if (dto.transporterId) {
-            const transporter = await this.prisma.user.findUnique({ where: { id: dto.transporterId } });
+            const transporter = await this.prisma.user.findUnique({ where: { id: dto.transporterId }, include: { company: true } });
             if (!transporter) throw new NotFoundException('Transporter not found');
-            if (transporter.kind !== 'LAST_MILE_DELIVERY') throw new BadRequestException('Selected user is not a transporter');
+            if (!this.isTransporterAccount(transporter)) throw new BadRequestException('Selected user is not a transporter');
          }
 
          // Upload waybill / custom docs
@@ -241,9 +243,11 @@ export class ShipmentsService {
       }
 
       if (dto.transporterId) {
-         const transporter = await this.prisma.user.findUnique({ where: { id: dto.transporterId } });
+         // Eligible transporter = a LAST_MILE_DELIVERY driver, or an LSP account
+         // whose Company.role is TRANSPORTER (see isTransporterAccount).
+         const transporter = await this.prisma.user.findUnique({ where: { id: dto.transporterId }, include: { company: true } });
          if (!transporter) throw new NotFoundException('Transporter not found');
-         if (transporter.kind !== 'LAST_MILE_DELIVERY') throw new BadRequestException('Invalid transporter');
+         if (!this.isTransporterAccount(transporter)) throw new BadRequestException('Invalid transporter');
       }
 
       let assignedLocation: { zoneId: string; rackId: string; binId: string } | null = null;
@@ -285,6 +289,66 @@ export class ShipmentsService {
          this.createNotification(lspUserId, `You accepted shipment ${updated.orderId}`, 'in-app'),
          this.createNotification(updated.customerId, `Shipment ${updated.orderId} has been accepted`, 'in-app'),
          dto.transporterId ? this.createNotification(dto.transporterId, `You have been assigned to shipment ${updated.orderId}`, 'in-app') : Promise.resolve(),
+      ]);
+
+      return updated;
+   }
+
+   // ─────────────────────────────────────────────────────────────────────────
+   // LSP SELF-ASSIGN AS TRANSPORTER
+   // For CROSS_BORDER shipments, the LSP that created the shipment can act as
+   // its own transporter instead of assigning a third party. Only eligible for
+   // LSP accounts whose Company.role is TRANSPORTER (see isTransporterAccount).
+   // ─────────────────────────────────────────────────────────────────────────
+   async selfAssignTransporter(shipmentId: string, lspUserId: string): Promise<Shipment> {
+      const user = await this.prisma.user.findUnique({ where: { id: lspUserId }, include: { company: true } });
+      if (!user) throw new NotFoundException('User not found');
+
+      if (user.kind !== 'LOGISTIC_SERVICE_PROVIDER' || !this.isTransporterAccount(user)) {
+         throw new ForbiddenException('Only an LSP account with a TRANSPORTER company role can self-assign as transporter');
+      }
+
+      const shipment = await this.prisma.shipment.findUnique({ where: { id: shipmentId } });
+      if (!shipment) throw new NotFoundException('Shipment not found');
+
+      if (shipment.createdBy !== lspUserId) {
+         throw new ForbiddenException('You can only self-assign as transporter on shipments you created');
+      }
+
+      if (shipment.shipmentType !== 'CROSS_BORDER') {
+         throw new BadRequestException('Self-assignment as transporter only applies to cross-border shipments');
+      }
+
+      if (shipment.assignedTransporterId && shipment.assignedTransporterId !== lspUserId) {
+         throw new BadRequestException('This shipment already has a different transporter assigned');
+      }
+
+      if (![ShipmentStatus.PENDING as string, ShipmentStatus.ACCEPTED as string].includes(shipment.status)) {
+         throw new BadRequestException('Shipment is not in a self-assignable state');
+      }
+
+      const nextStatus = shipment.status === (ShipmentStatus.PENDING as any) ? ShipmentStatus.ACCEPTED : (shipment.status as ShipmentStatus);
+
+      const updated = await this.prisma.$transaction(async (tx: any) => {
+         const updatedShipment = await tx.shipment.update({
+            where: { id: shipmentId },
+            data: {
+               assignedTransporterId: lspUserId,
+               status: nextStatus as any,
+            },
+            include: { transporter: true, warehouse: true },
+         });
+
+         await tx.shipmentStatusHistory.create({
+            data: { shipmentId, status: nextStatus as any, updatedBy: lspUserId, note: 'LSP self-assigned as transporter' },
+         });
+
+         return updatedShipment;
+      });
+
+      await Promise.all([
+         this.createNotification(lspUserId, `You are now the transporter for shipment ${updated.orderId}`, 'in-app'),
+         updated.customerId ? this.createNotification(updated.customerId, `Shipment ${updated.orderId} is being handled directly by your logistics provider as transporter`, 'in-app') : Promise.resolve(),
       ]);
 
       return updated;

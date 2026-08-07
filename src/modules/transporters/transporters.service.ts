@@ -4,12 +4,14 @@ import { MailService } from '../../common/mail/mail.service';
 import UrlService from '../auth/url.service';
 import { AddTransporterDto } from './dto/add-transporter.dto';
 import { UpdateTransporterDto } from './dto/update-transporter.dto';
+import { ListLspTransportersDto } from './dto/list-lsp-transporters.dto';
 
 // A registered account counts as an eligible "transporter" if it is either
 // a LAST_MILE_DELIVERY driver, or a LOGISTIC_SERVICE_PROVIDER company whose
 // CompanyRole is TRANSPORTER.
 const TRANSPORTER_KIND = 'LAST_MILE_DELIVERY';
 const TRANSPORTER_ROLE = 'TRANSPORTER';
+const TRANSPORTER_LSP_KIND = 'LOGISTIC_SERVICE_PROVIDER';
 
 @Injectable()
 export class TransportersService {
@@ -188,6 +190,68 @@ export class TransportersService {
 
       await this.prisma.savedTransporter.delete({ where: { id } });
       return { message: 'Transporter removed' };
+   }
+
+   // ─── LIST LSP-AS-TRANSPORTER ACCOUNTS ───────────────────────────────────────
+   // Public directory of LOGISTIC_SERVICE_PROVIDER accounts whose Company.role
+   // is TRANSPORTER — i.e. LSPs that can be picked as the `transporterId` on a
+   // shipment (most relevant for CROSS_BORDER shipments) instead of a
+   // third-party LAST_MILE_DELIVERY driver. This is intentionally separate from
+   // listSavedTransporters(), which is a per-account address book.
+   async listLspTransporters(filters: ListLspTransportersDto) {
+      const { page = 1, limit = 20, country, search } = filters;
+      const skip = (page - 1) * limit;
+
+      const where: any = {
+         kind: TRANSPORTER_LSP_KIND,
+         deactivatedAt: null,
+         company: {
+            role: TRANSPORTER_ROLE,
+            ...(country ? { country: { contains: country, mode: 'insensitive' } } : {}),
+            ...(search ? { businessName: { contains: search, mode: 'insensitive' } } : {}),
+         },
+      };
+
+      const [transporters, total] = await Promise.all([
+         this.prisma.user.findMany({
+            where,
+            skip,
+            take: limit,
+            orderBy: { createdAt: 'desc' },
+            include: { company: true },
+         }),
+         this.prisma.user.count({ where }),
+      ]);
+
+      const ids = transporters.map((t: any) => t.id);
+      const ratingAgg = ids.length
+         ? await this.prisma.transporterRating.groupBy({
+              by: ['transporterId'],
+              where: { transporterId: { in: ids } },
+              _avg: { rating: true },
+              _count: { rating: true },
+           })
+         : [];
+      const ratingMap = new Map<string, { averageRating: number | null; totalRatings: number }>(
+         ratingAgg.map((r: any) => [r.transporterId, { averageRating: r._avg.rating ? Number(r._avg.rating.toFixed(1)) : null, totalRatings: r._count.rating }]),
+      );
+
+      const data = transporters.map((t: any) => ({
+         id: t.id,
+         businessName: t.company?.businessName ?? null,
+         email: t.email,
+         phone: t.phone,
+         profilePicture: t.profilePicture,
+         country: t.company?.country ?? null,
+         city: t.company?.city ?? null,
+         businessAddress: t.company?.businessAddress ?? null,
+         vehicleType: t.company?.vehicleType ?? null,
+         isVerified: t.isVerified,
+         averageRating: ratingMap.get(t.id)?.averageRating ?? null,
+         totalRatings: ratingMap.get(t.id)?.totalRatings ?? 0,
+      }));
+
+      return { data, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
    }
 
    private async notify(userId: string, message: string) {
