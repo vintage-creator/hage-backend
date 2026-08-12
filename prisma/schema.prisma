@@ -226,6 +226,7 @@ model Company {
   Warehouse         Warehouse[] // keep relation to warehouses
   InventoryLocation InventoryLocation[]
   slaSettings       SlaSetting[]
+  pricingRules      PricingRule[]
 
   @@index([emailAddress])
 }
@@ -292,6 +293,49 @@ model SlaSetting {
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// PRICING MANAGEMENT (enterprise: set a $/tonnage rate per lane)
+// ─────────────────────────────────────────────────────────────────────────
+// A PricingRule is one lane config (origin -> destination, vehicle type,
+// currency, service level) for a company. Each rule has one or more tonnage
+// bands (PricingTier) whose `price` is the cost for shipping `toTons` tons on
+// that lane; the shipping fee for an actual shipment is the matching band's
+// per-ton rate (price / toTons) multiplied by the shipment's tons.
+model PricingRule {
+  id           String  @id @default(cuid())
+  companyId    String
+  origin       String // e.g. state/region/country of pickup
+  destination  String // e.g. state/region/country of delivery
+  vehicleType  String // e.g. Tipper, Flatbed, Truck
+  currency     String  @default("NGN")
+  serviceLevel String // e.g. Regular, Express
+  isActive     Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  tiers   PricingTier[]
+
+  @@index([companyId])
+  @@index([origin, destination, vehicleType, serviceLevel])
+}
+
+model PricingTier {
+  id            String @id @default(cuid())
+  pricingRuleId String
+  fromTons      Float
+  toTons        Float
+  price         Float
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pricingRule PricingRule @relation(fields: [pricingRuleId], references: [id], onDelete: Cascade)
+
+  @@index([pricingRuleId])
 }
 
 model ReportedIssue {

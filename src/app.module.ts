@@ -18,6 +18,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { CommunicationsModule } from './modules/communications/communications.module';
 import { LastMileModule } from './modules/last-mile/last-mile.module';
 import { TransportersModule } from './modules/transporters/transporters.module';
+import { PricingModule } from './modules/pricing/pricing.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -39,6 +40,7 @@ import { HealthModule } from './health/health.module';
       CommunicationsModule,
       LastMileModule,
       TransportersModule,
+      PricingModule,
       HealthModule,
    ],
    controllers: [],
