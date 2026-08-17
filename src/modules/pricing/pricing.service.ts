@@ -3,7 +3,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePricingRuleDto, ListPricingRulesQueryDto, UpdatePricingRuleDto } from './dto/pricing.dto';
 
 // Transporter's cut of the shipping fee (5%)
-const TRANSPORTER_FEE_RATE = 0.05;
+const TRANSPORTER_FEE_RATE = 0.03;
+const CUSTOM_FEE_RATE = 0.05;
 
 @Injectable()
 export class PricingService {
@@ -247,19 +248,21 @@ export class PricingService {
       const ratePerTon = tier.price / tier.toTons;
       const shippingFee = this.round2(ratePerTon * tons);
       const transporterFee = this.round2(shippingFee * TRANSPORTER_FEE_RATE);
+      const customDutyFee = this.round2(shippingFee * CUSTOM_FEE_RATE);
 
       return {
-         shipmentId: shipment.id,
-         orderId: shipment.orderId,
-         tons,
-         currency: rule.currency,
-         pricingRuleId: rule.id,
-         pricingTierId: tier.id,
-         matchedLane: { origin: rule.origin, destination: rule.destination, vehicleType: rule.vehicleType, serviceLevel: rule.serviceLevel },
-         ratePerTon: this.round2(ratePerTon),
+         // shipmentId: shipment.id,
+         // orderId: shipment.orderId,
+         // tons,
+         // currency: rule.currency,
+         // pricingRuleId: rule.id,
+         // pricingTierId: tier.id,
+         // matchedLane: { origin: rule.origin, destination: rule.destination, vehicleType: rule.vehicleType, serviceLevel: rule.serviceLevel },
+         // ratePerTon: this.round2(ratePerTon),
          shippingCost: shippingFee,
-         transporterFeeRate: TRANSPORTER_FEE_RATE,
+         // transporterFeeRate: TRANSPORTER_FEE_RATE,
          transactionFee: transporterFee,
+         customDutyFee
       };
    }
 }
