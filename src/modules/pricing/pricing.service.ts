@@ -257,9 +257,9 @@ export class PricingService {
          pricingTierId: tier.id,
          matchedLane: { origin: rule.origin, destination: rule.destination, vehicleType: rule.vehicleType, serviceLevel: rule.serviceLevel },
          ratePerTon: this.round2(ratePerTon),
-         shippingFee,
+         shippingCost: shippingFee,
          transporterFeeRate: TRANSPORTER_FEE_RATE,
-         transporterFee,
+         transactionFee: transporterFee,
       };
    }
 }

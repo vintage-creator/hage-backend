@@ -199,16 +199,13 @@ export class TransportersService {
    // third-party LAST_MILE_DELIVERY driver. This is intentionally separate from
    // listSavedTransporters(), which is a per-account address book.
    async listLspTransporters(filters: ListLspTransportersDto) {
-      const { page = 1, limit = 20, country, search } = filters;
+      const { page = 1, limit = 20 } = filters;
       const skip = (page - 1) * limit;
 
       const where: any = {
          kind: TRANSPORTER_LSP_KIND,
-         deactivatedAt: null,
          company: {
             role: TRANSPORTER_ROLE,
-            ...(country ? { country: { contains: country, mode: 'insensitive' } } : {}),
-            ...(search ? { businessName: { contains: search, mode: 'insensitive' } } : {}),
          },
       };
 
@@ -222,6 +219,9 @@ export class TransportersService {
          }),
          this.prisma.user.count({ where }),
       ]);
+
+      console.log(transporters);
+      
 
       const ids = transporters.map((t: any) => t.id);
       const ratingAgg = ids.length
