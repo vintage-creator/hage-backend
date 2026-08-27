@@ -14,9 +14,12 @@ export class TransporterBidService {
 
    // ─── SUBMIT A BID (transporter) ────────────────────────────────────────────
    async submitBid(shipmentId: string, transporterId: string, dto: CreateBidDto) {
-      const transporter = await this.prisma.user.findUnique({ where: { id: transporterId } });
+      // A "transporter" is either a LAST_MILE_DELIVERY driver, or an LSP account
+      // whose Company.role is TRANSPORTER — same rule used for shipment assignment
+      // in ShipmentsService (see isTransporterAccount).
+      const transporter = await this.prisma.user.findUnique({ where: { id: transporterId }, include: { company: true } });
       if (!transporter) throw new NotFoundException('Transporter not found');
-      if (transporter.kind !== 'LAST_MILE_DELIVERY') throw new ForbiddenException('Only transporters can submit bids');
+      if (!this.shipmentsService.isTransporterAccount(transporter)) throw new ForbiddenException('Only transporters can submit bids');
 
       const shipment = await this.prisma.shipment.findUnique({ where: { id: shipmentId } });
       if (!shipment) throw new NotFoundException('Shipment not found');
@@ -50,11 +53,11 @@ export class TransporterBidService {
       if (!shipment) throw new NotFoundException('Shipment not found');
 
       // Only the shipment owner or the transporter themselves can see bids
-      const user = await this.prisma.user.findUnique({ where: { id: userId } });
+      const user = await this.prisma.user.findUnique({ where: { id: userId }, include: { company: true } });
       if (!user) throw new NotFoundException('User not found');
 
       const isOwner = shipment.createdBy === userId || shipment.customerId === userId;
-      const isTransporter = user.kind === 'LAST_MILE_DELIVERY';
+      const isTransporter = this.shipmentsService.isTransporterAccount(user);
 
       if (!isOwner && !isTransporter) throw new ForbiddenException('Access denied');
 

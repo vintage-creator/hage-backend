@@ -23,6 +23,12 @@ enum DocumentType {
 // Platform fee rate (2.5%)
 const TRANSACTION_FEE_RATE = 0.025;
 
+// ─── MINIMUM COST FORMULA ────────────────────────────────────────────────
+// Shipping fee = Base fee + (distance × rate per km) + weight charge
+const MIN_COST_BASE_FEE = 1000; // flat base fee (NGN)
+const MIN_COST_RATE_PER_KM = 100; // charged per km travelled
+const MIN_COST_RATE_PER_KG = 50; // charged per kg of cargo weight
+
 // Share of the shipment total cost credited to a LAST_MILE_DELIVERY driver's wallet on delivery
 const DRIVER_EARNING_RATE = 0.8;
 
@@ -70,16 +76,57 @@ export class ShipmentsService {
       return dt.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
    }
 
+   private haversineDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
+      const toRad = (v: number) => (v * Math.PI) / 180;
+      const R = 6371;
+      const dLat = toRad(lat2 - lat1);
+      const dLng = toRad(lng2 - lng1);
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+   }
+
+   // ─────────────────────────────────────────────────────────────────────────
+   // MINIMUM COST (floor price for the "create order" screen)
+   // Shipping fee = Base fee + (distance × rate per km) + weight charge
+   // ─────────────────────────────────────────────────────────────────────────
+   getMinimumCost(dto: { pickupLat?: number; pickupLng?: number; deliveryLat?: number; deliveryLng?: number; distanceKm?: number; weight?: number }) {
+      let distanceKm: number;
+
+      if (dto.distanceKm !== undefined && dto.distanceKm !== null) {
+         distanceKm = Number(dto.distanceKm);
+      } else if (dto.pickupLat != null && dto.pickupLng != null && dto.deliveryLat != null && dto.deliveryLng != null) {
+         distanceKm = this.haversineDistanceKm(Number(dto.pickupLat), Number(dto.pickupLng), Number(dto.deliveryLat), Number(dto.deliveryLng));
+      } else {
+         throw new BadRequestException('Provide either distanceKm, or all of pickupLat/pickupLng/deliveryLat/deliveryLng, to calculate the minimum cost');
+      }
+
+      if (distanceKm < 0) throw new BadRequestException('distanceKm cannot be negative');
+
+      const weight = Number(dto.weight ?? 0);
+
+      const baseFee = MIN_COST_BASE_FEE;
+      const distanceCharge = distanceKm * MIN_COST_RATE_PER_KM;
+      const weightCharge = weight * MIN_COST_RATE_PER_KG;
+
+      const minimumCost = Math.round((baseFee + distanceCharge + weightCharge) * 100) / 100;
+
+      return {
+         baseFee,
+         distanceKm: Math.round(distanceKm * 100) / 100,
+         ratePerKm: MIN_COST_RATE_PER_KM,
+         distanceCharge: Math.round(distanceCharge * 100) / 100,
+         weight,
+         ratePerKg: MIN_COST_RATE_PER_KG,
+         weightCharge: Math.round(weightCharge * 100) / 100,
+         minimumCost,
+      };
+   }
+
    // ─────────────────────────────────────────────────────────────────────────
    // CALCULATE PRICE (for summary screen before creating shipment)
    // ─────────────────────────────────────────────────────────────────────────
-   calculatePrice(dto: {
-      shipmentType: string;
-      baseFrieght?: number;
-      handlingFee?: number;
-      insuranceFee?: number;
-      cargoDuty?: number;
-   }) {
+   calculatePrice(dto: { shipmentType: string; baseFrieght?: number; handlingFee?: number; insuranceFee?: number; cargoDuty?: number }) {
       const base = Number(dto.baseFrieght ?? 0);
       const handling = Number(dto.handlingFee ?? 0);
       const insurance = Number(dto.insuranceFee ?? 0);
@@ -129,6 +176,19 @@ export class ShipmentsService {
          const normalizedOrigin = this.safeParseLocation(dto.origin);
          const normalizedDestination = this.safeParseLocation(dto.destination);
 
+         // Fall back to the formula-based minimum cost when no shippingCost was supplied,
+         // as long as we have enough info (pickup/delivery coordinates) to compute distance.
+         let shippingCost = dto.shippingCost;
+         // if (shippingCost === undefined && dto.pickupLat != null && dto.pickupLng != null && dto.deliveryLat != null && dto.deliveryLng != null) {
+         //    shippingCost = this.getMinimumCost({
+         //       pickupLat: dto.pickupLat,
+         //       pickupLng: dto.pickupLng,
+         //       deliveryLat: dto.deliveryLat,
+         //       deliveryLng: dto.deliveryLng,
+         //       weight: dto.weight,
+         //    }).minimumCost;
+         // }
+
          const shipment = await this.prisma.$transaction(async (tx: any) => {
             const created = await tx.shipment.create({
                data: {
@@ -167,7 +227,7 @@ export class ShipmentsService {
                   insuranceFee: insurance,
                   transactionFee,
                   totalCost,
-                  shippingCost: dto.shippingCost,
+                  shippingCost,
                   tonnage: dto.tonnage,
                   status: ShipmentStatus.PENDING as any,
                   assignedTransporterId: dto.transporterId ?? null,
@@ -344,7 +404,9 @@ export class ShipmentsService {
 
       await Promise.all([
          this.createNotification(lspUserId, `You are now the transporter for shipment ${updated.orderId}`, 'in-app'),
-         updated.customerId ? this.createNotification(updated.customerId, `Shipment ${updated.orderId} is being handled directly by your logistics provider as transporter`, 'in-app') : Promise.resolve(),
+         updated.customerId
+            ? this.createNotification(updated.customerId, `Shipment ${updated.orderId} is being handled directly by your logistics provider as transporter`, 'in-app')
+            : Promise.resolve(),
       ]);
 
       return updated;
@@ -501,7 +563,7 @@ export class ShipmentsService {
    // A user counts as a "transporter" for assignment/accept-reject purposes if
    // they're a LAST_MILE_DELIVERY driver, or a LOGISTIC_SERVICE_PROVIDER company
    // whose CompanyRole is TRANSPORTER.
-   private isTransporterAccount(user: { kind?: string; company?: { role?: string | null } | null }): boolean {
+   isTransporterAccount(user: { kind?: string; company?: { role?: string | null } | null }): boolean {
       return user.kind === 'LAST_MILE_DELIVERY' || user.company?.role === 'TRANSPORTER';
    }
 
@@ -602,7 +664,12 @@ export class ShipmentsService {
             skip,
             take: limit,
             orderBy: { createdAt: 'desc' },
-            include: { transporter: { select: { id: true, email: true } }, documents: true, statusHistory: { orderBy: { timestamp: 'desc' }, take: 5 }, bids: { include: { transporter: { select: { id: true, email: true } } } } },
+            include: {
+               transporter: { select: { id: true, email: true } },
+               documents: true,
+               statusHistory: { orderBy: { timestamp: 'desc' }, take: 5 },
+               bids: { include: { transporter: { select: { id: true, email: true } } } },
+            },
          }),
          this.prisma.shipment.count({ where }),
       ]);

@@ -7,6 +7,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ShipmentsService } from './shipments.service';
 import { CreateShipmentDto } from './dto/create-shipment.dto';
+import { MinimumCostDto } from './dto/minimum-cost.dto';
 import { UpdateShipmentDto } from './dto/update-shipment.dto';
 import { Request } from 'express';
 import { AssignShipmentDto } from './dto/assign-shipment.dto';
@@ -40,6 +41,35 @@ export class ShipmentsController {
    @ApiOperation({ summary: 'Calculate shipment price breakdown', description: 'Returns shippingCost, cargoDuty, transactionFee, and total for the summary screen.' })
    calculatePrice(@Body() dto: CalculatePriceDto) {
       return this.svc.calculatePrice({ ...dto, shipmentType: dto.shipmentType ?? 'INLAND' });
+   }
+
+   // MINIMUM COST (create-order screen — floor price before submitting)
+   @Post('minimum-cost')
+   @UseGuards(JwtAuthGuard)
+   @ApiBearerAuth('access-token')
+   @ApiOperation({
+      summary: 'Get the minimum shipping cost for an order',
+      description:
+         'Shipping fee = Base fee + (distance × rate per km) + weight charge. Pass `distanceKm` directly, or pickupLat/pickupLng/deliveryLat/deliveryLng to have the distance computed for you. `weight` is in kg.',
+   })
+   @ApiResponse({
+      status: 200,
+      description: 'Minimum cost breakdown',
+      schema: {
+         example: {
+            baseFee: 1000,
+            distanceKm: 12.4,
+            ratePerKm: 100,
+            distanceCharge: 1240,
+            weight: 20,
+            ratePerKg: 50,
+            weightCharge: 1000,
+            minimumCost: 3240,
+         },
+      },
+   })
+   getMinimumCost(@Body() dto: MinimumCostDto) {
+      return this.svc.getMinimumCost(dto);
    }
 
    // ✅ CREATE SHIPMENT
