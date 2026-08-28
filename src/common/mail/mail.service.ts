@@ -1,232 +1,196 @@
-import { Injectable, Logger } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import fs from "fs";
-import path from "path";
-import Handlebars from "handlebars";
-import mjml2html from "mjml";
-import juice from "juice";
-import nodemailer, { Transporter } from "nodemailer";
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import fs from 'fs';
+import path from 'path';
+import Handlebars from 'handlebars';
+import mjml2html from 'mjml';
+import juice from 'juice';
+import nodemailer, { Transporter } from 'nodemailer';
 
 @Injectable()
 export class MailService {
-  private transporter: Transporter;
-  private logger = new Logger(MailService.name);
-  private templatesDir: string;
+   private transporter: Transporter;
+   private logger = new Logger(MailService.name);
+   private templatesDir: string;
 
-  constructor(private cfg: ConfigService) {
-    this.templatesDir = this.findTemplatesDir();
-    this.logger.log(`Using templates directory: ${this.templatesDir}`);
+   constructor(private cfg: ConfigService) {
+      this.templatesDir = this.findTemplatesDir();
+      this.logger.log(`Using templates directory: ${this.templatesDir}`);
 
-    const host = this.cfg.get<string>("MAIL_HOST");
-    const port = Number(this.cfg.get<string>("MAIL_PORT") ?? 587);
-    const user = this.cfg.get<string>("MAIL_USER");
-    const pass = this.cfg.get<string>("MAIL_PASS");
+      const host = this.cfg.get<string>('MAIL_HOST');
+      const port = Number(this.cfg.get<string>('MAIL_PORT') ?? 587);
+      const user = this.cfg.get<string>('MAIL_USER');
+      const pass = this.cfg.get<string>('MAIL_PASS');
 
-    if (!host || !user || !pass) {
-      this.logger.warn(
-        "Mailtrap SMTP config missing. Set MAIL_HOST, MAIL_PORT, MAIL_USER and MAIL_PASS."
-      );
-    }
-
-    this.transporter = nodemailer.createTransport({
-      host: host ?? "live.smtp.mailtrap.io",
-      port,
-      secure: port === 465,
-      auth: {
-        user: user ?? "",
-        pass: pass ?? "",
-      },
-      requireTLS: port !== 465,
-    });
-
-    this.testConnection();
-  }
-
-  private findTemplatesDir(): string {
-    const possiblePaths = [
-      path.join(process.cwd(), "src", "common", "mail", "templates"),
-      path.join(process.cwd(), "dist", "common", "mail", "templates"),
-      path.join(__dirname, "templates"),
-      path.join(process.cwd(), "common", "mail", "templates"),
-    ];
-
-    for (const dirPath of possiblePaths) {
-      this.logger.log(`Checking for templates at: ${dirPath}`);
-
-      if (fs.existsSync(dirPath)) {
-        const files = fs.readdirSync(dirPath);
-        this.logger.log(
-          `Found templates directory with files: ${files.join(", ")}`
-        );
-        return dirPath;
-      }
-    }
-
-    throw new Error(
-      `Could not find templates directory. Checked: ${possiblePaths.join(", ")}`
-    );
-  }
-
-  private async testConnection() {
-    const host = this.cfg.get<string>("MAIL_HOST");
-    const user = this.cfg.get<string>("MAIL_USER");
-    const pass = this.cfg.get<string>("MAIL_PASS");
-
-    if (!host || !user || !pass) {
-      this.logger.error(
-        "Mailtrap SMTP credentials missing. Emails will fail until configured."
-      );
-      return;
-    }
-
-    try {
-      await this.transporter.verify();
-      this.logger.log(
-        "Mailtrap SMTP configured successfully. SMTP connection verified."
-      );
-    } catch (error: any) {
-      this.logger.error(
-        `Mailtrap SMTP verification failed: ${error?.message ?? error}`
-      );
-    }
-  }
-
-  private loadTemplate(templateName: string) {
-    try {
-      const mjmlPath = path.join(this.templatesDir, `${templateName}.mjml`);
-      const txtPath = path.join(
-        this.templatesDir,
-        "text",
-        `${templateName}.txt.hbs`
-      );
-
-      this.logger.log(`Loading MJML from: ${mjmlPath}`);
-      this.logger.log(`Loading text template from: ${txtPath}`);
-
-      if (!fs.existsSync(mjmlPath)) {
-        throw new Error(`MJML template not found: ${mjmlPath}`);
+      if (!host || !user || !pass) {
+         this.logger.warn('Mailtrap SMTP config missing. Set MAIL_HOST, MAIL_PORT, MAIL_USER and MAIL_PASS.');
       }
 
-      const mjmlSource = fs.readFileSync(mjmlPath, "utf8");
-      const txtSource = fs.existsSync(txtPath)
-        ? fs.readFileSync(txtPath, "utf8")
-        : "";
-
-      this.logger.log(`Successfully loaded template: ${templateName}`);
-
-      return { mjmlSource, txtSource };
-    } catch (err) {
-      this.logger.error(
-        `Failed loading email template "${templateName}": ${(err as any).message}`
-      );
-      throw err;
-    }
-  }
-
-  private compile(templateSource: string, ctx: any) {
-    const template = Handlebars.compile(templateSource);
-    return template(ctx);
-  }
-
-  async sendFromTemplate(
-    to: string,
-    subject: string,
-    templateName: string,
-    context: any
-  ) {
-    try {
-      const { mjmlSource, txtSource } = this.loadTemplate(templateName);
-
-      const fullCtx = {
-        year: new Date().getFullYear(),
-        appName: this.cfg.get("APP_NAME") ?? "Hage Logistics",
-        logoUrl:
-          this.cfg.get("APP_LOGO") ?? `${this.cfg.get("APP_URL")}/logo.png`,
-        supportText:
-          this.cfg.get("SUPPORT_TEXT") ?? "Need help? Contact hello@tryhage.com",
-        ...context,
-      };
-
-      const mjmlWithVars = this.compile(mjmlSource, fullCtx);
-
-      const { html, errors } = mjml2html(mjmlWithVars, {
-        validationLevel: "soft",
+      this.transporter = nodemailer.createTransport({
+         host: host ?? 'live.smtp.mailtrap.io',
+         port,
+         secure: port === 465,
+         auth: {
+            user: user ?? '',
+            pass: pass ?? '',
+         },
+         requireTLS: port !== 465,
       });
 
-      if (errors && errors.length) {
-        this.logger.warn("MJML warnings: " + JSON.stringify(errors));
+      this.testConnection();
+   }
+
+   private findTemplatesDir(): string {
+      const possiblePaths = [
+         path.join(process.cwd(), 'src', 'common', 'mail', 'templates'),
+         path.join(process.cwd(), 'dist', 'common', 'mail', 'templates'),
+         path.join(__dirname, 'templates'),
+         path.join(process.cwd(), 'common', 'mail', 'templates'),
+      ];
+
+      for (const dirPath of possiblePaths) {
+         this.logger.log(`Checking for templates at: ${dirPath}`);
+
+         if (fs.existsSync(dirPath)) {
+            const files = fs.readdirSync(dirPath);
+            this.logger.log(`Found templates directory with files: ${files.join(', ')}`);
+            return dirPath;
+         }
       }
 
-      const inlined = juice(html);
+      throw new Error(`Could not find templates directory. Checked: ${possiblePaths.join(', ')}`);
+   }
 
-      const text = txtSource
-        ? this.compile(txtSource, fullCtx)
-        : this.stripHtmlToText(inlined);
+   private async testConnection() {
+      const host = this.cfg.get<string>('MAIL_HOST');
+      const user = this.cfg.get<string>('MAIL_USER');
+      const pass = this.cfg.get<string>('MAIL_PASS');
 
-      const from = this.cfg.get<string>("MAIL_FROM");
-
-      if (!from) {
-        throw new Error("MAIL_FROM is not configured");
+      if (!host || !user || !pass) {
+         this.logger.error('Mailtrap SMTP credentials missing. Emails will fail until configured.');
+         return;
       }
 
-      const result = await this.transporter.sendMail({
-        from,
-        to,
-        subject,
-        html: inlined,
-        text,
-      });
+      try {
+         await this.transporter.verify();
+         this.logger.log('Mailtrap SMTP configured successfully. SMTP connection verified.');
+      } catch (error: any) {
+         this.logger.error(`Mailtrap SMTP verification failed: ${error?.message ?? error}`);
+      }
+   }
 
-      this.logger.verbose(
-        `Email sent to ${to} via Mailtrap SMTP. messageId=${result.messageId}`
-      );
+   private loadTemplate(templateName: string) {
+      try {
+         const mjmlPath = path.join(this.templatesDir, `${templateName}.mjml`);
+         const txtPath = path.join(this.templatesDir, 'text', `${templateName}.txt.hbs`);
 
-      return result;
-    } catch (err) {
-      this.logger.error(
-        `Failed to send email [template=${templateName}, to=${to}]: ${
-          (err as any).message
-        }`
-      );
-      throw err;
-    }
-  }
+         this.logger.log(`Loading MJML from: ${mjmlPath}`);
+         this.logger.log(`Loading text template from: ${txtPath}`);
 
-  private stripHtmlToText(html: string) {
-    return html.replace(/<\/?[^>]+(>|$)/g, "").replace(/\s+/g, " ").trim();
-  }
+         if (!fs.existsSync(mjmlPath)) {
+            throw new Error(`MJML template not found: ${mjmlPath}`);
+         }
 
-  async sendVerificationEmail(email: string, context: any) {
-    const subject = `${this.cfg.get("APP_NAME")}: Verify your email`;
-    return this.sendFromTemplate(email, subject, "verification", context);
-  }
+         const mjmlSource = fs.readFileSync(mjmlPath, 'utf8');
+         const txtSource = fs.existsSync(txtPath) ? fs.readFileSync(txtPath, 'utf8') : '';
 
-  async sendResetPasswordEmail(email: string, context: any) {
-    const subject = `${this.cfg.get("APP_NAME")}: Reset your password`;
-    return this.sendFromTemplate(email, subject, "reset-password", context);
-  }
+         this.logger.log(`Successfully loaded template: ${templateName}`);
 
-  async sendShipmentCreated(email: string, context: any) {
-    const subject = `${this.cfg.get("APP_NAME")}: Shipment ${
-      context.trackingNumber
-    } created`;
-    return this.sendFromTemplate(email, subject, "shipment-created", context);
-  }
+         return { mjmlSource, txtSource };
+      } catch (err) {
+         this.logger.error(`Failed loading email template "${templateName}": ${(err as any).message}`);
+         throw err;
+      }
+   }
 
-  async sendShipmentStatusUpdate(email: string, context: any) {
-    const subject = `${this.cfg.get("APP_NAME")}: Shipment ${
-      context.trackingNumber
-    } status updated`;
-    return this.sendFromTemplate(
-      email,
-      subject,
-      "shipment-status-update",
-      context
-    );
-  }
+   private compile(templateSource: string, ctx: any) {
+      const template = Handlebars.compile(templateSource);
+      return template(ctx);
+   }
 
-  async sendWaitlistAdminNotification(to: string, context: any) {
-    const subject = `${this.cfg.get("APP_NAME")}: New Marketplace Waitlist Entry`;
-    return this.sendFromTemplate(to, subject, "join-waitlist", context);
-  }
+   async sendFromTemplate(to: string, subject: string, templateName: string, context: any) {
+      try {
+         const { mjmlSource, txtSource } = this.loadTemplate(templateName);
+
+         const fullCtx = {
+            year: new Date().getFullYear(),
+            appName: this.cfg.get('APP_NAME') ?? 'Hage Logistics',
+            logoUrl: this.cfg.get('APP_LOGO') ?? `${this.cfg.get('APP_URL')}/logo.png`,
+            supportText: this.cfg.get('SUPPORT_TEXT') ?? 'Need help? Contact hello@tryhage.com',
+            ...context,
+         };
+
+         const mjmlWithVars = this.compile(mjmlSource, fullCtx);
+
+         const { html, errors } = mjml2html(mjmlWithVars, {
+            validationLevel: 'soft',
+         });
+
+         if (errors && errors.length) {
+            this.logger.warn('MJML warnings: ' + JSON.stringify(errors));
+         }
+
+         const inlined = juice(html);
+
+         const text = txtSource ? this.compile(txtSource, fullCtx) : this.stripHtmlToText(inlined);
+
+         const from = this.cfg.get<string>('MAIL_FROM');
+
+         if (!from) {
+            throw new Error('MAIL_FROM is not configured');
+         }
+
+         const result = await this.transporter.sendMail({
+            from,
+            to,
+            subject,
+            html: inlined,
+            text,
+         });
+
+         this.logger.verbose(`Email sent to ${to} via Mailtrap SMTP. messageId=${result.messageId}`);
+
+         return result;
+      } catch (err) {
+         this.logger.error(`Failed to send email [template=${templateName}, to=${to}]: ${(err as any).message}`);
+         throw err;
+      }
+   }
+
+   private stripHtmlToText(html: string) {
+      return html
+         .replace(/<\/?[^>]+(>|$)/g, '')
+         .replace(/\s+/g, ' ')
+         .trim();
+   }
+
+   async sendVerificationEmail(email: string, context: any) {
+      const subject = `${this.cfg.get('APP_NAME')}: Verify your email`;
+      return this.sendFromTemplate(email, subject, 'verification', context);
+   }
+
+   async sendResetPasswordEmail(email: string, context: any) {
+      const subject = `${this.cfg.get('APP_NAME')}: Reset your password`;
+      return this.sendFromTemplate(email, subject, 'reset-password', context);
+   }
+
+   async sendShipmentCreated(email: string, context: any) {
+      const subject = `${this.cfg.get('APP_NAME')}: Shipment ${context.trackingNumber} created`;
+      return this.sendFromTemplate(email, subject, 'shipment-created', context);
+   }
+
+   async sendShipmentStatusUpdate(email: string, context: any) {
+      const subject = `${this.cfg.get('APP_NAME')}: Shipment ${context.trackingNumber} status updated`;
+      return this.sendFromTemplate(email, subject, 'shipment-status-update', context);
+   }
+
+   async sendTransporterInvite(email: string, context: any) {
+      const subject = context.alreadyRegistered ? `${this.cfg.get('APP_NAME')}: You've been added as a transporter` : `${this.cfg.get('APP_NAME')}: You're invited to join as a transporter`;
+      return this.sendFromTemplate(email, subject, 'transporter-invite', context);
+   }
+
+   async sendWaitlistAdminNotification(to: string, context: any) {
+      const subject = `${this.cfg.get('APP_NAME')}: New Marketplace Waitlist Entry`;
+      return this.sendFromTemplate(to, subject, 'join-waitlist', context);
+   }
 }

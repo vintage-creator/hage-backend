@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum UserKind {
@@ -24,6 +25,12 @@ enum CompanyRole {
 enum DocType {
   COMPANY_REGISTRATION_CERTIFICATE
   TAX_REGISTRATION_CERTIFICATE
+  UTILITY_BILL
+  GOVERNMENT_ISSUED_ID
+  PASSPORT_PHOTOGRAPH
+  VEHICLE_REGISTRATION_CERTIFICATE
+  VEHICLE_INSURANCE
+  CAC_REGISTRATION_CERTIFICATE
 }
 
 enum WarehouseStatus {
@@ -49,9 +56,53 @@ enum InventoryCondition {
   EXPIRED
 }
 
+enum ShipmentType {
+  INLAND
+  CROSS_BORDER
+}
+
+enum Visibility {
+  PUBLIC
+  PRIVATE
+  ASSIGNED
+}
+
+enum FreightType {
+  SEA_FREIGHT
+  AIR_FREIGHT
+}
+
 enum ShipmentStatus {
   PENDING
+  ACCEPTED
   IN_WAREHOUSE
+  IN_TRANSIT
+  PICKED_UP
+  DELIVERED
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+enum BidStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum CommunicationThreadStatus {
+  ACTIVE
+  CLOSED
+}
+
+enum CallSessionStatus {
+  REQUESTED
+  RINGING
+  ONGOING
+  ENDED
+  MISSED
+  REJECTED
+  CANCELLED
 }
 
 enum DocumentType {
@@ -59,6 +110,8 @@ enum DocumentType {
   PACKING_LIST
   WAYBILL
   BILL_OF_LADING
+  PROOF_OF_DELIVERY
+  SIGNATURE
   OTHER
 }
 
@@ -68,22 +121,68 @@ enum NotificationType {
   SMS
 }
 
+enum PaymentMethodType {
+  CARD
+  LOCAL_BANK
+}
+
+enum CardBrand {
+  VISA
+  MASTERCARD
+}
+
+enum DriverEarningStatus {
+  PENDING
+  AVAILABLE
+  WITHDRAWN
+}
+
+enum WithdrawalStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum SavedTransporterStatus {
+  INVITED // invite sent, transporter has not yet linked/joined
+  ACTIVE // linked to a real transporter account
+  DECLINED // transporter rejected the invite / relationship
+}
+
+enum TeamMemberRole {
+  ADMIN
+  MANAGER
+  VIEWER
+}
+
 model User {
-  id              String   @id @default(cuid())
-  email           String?  @unique
-  phone           String?  @unique
-  password        String?
-  profilePicture  String?
-  kind            UserKind
-  companyId       String?
-  isVerified      Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String    @id @default(cuid())
+  email          String?   @unique
+  phone          String?   @unique
+  password       String?
+  profilePicture String?
+  kind           UserKind
+  companyId      String?
+  isVerified     Boolean   @default(false)
+  deactivatedAt  DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // LAST_MILE_DELIVERY driver fields
+  isAvailable   Boolean @default(false) // online/offline toggle on the driver dashboard
+  walletBalance Float   @default(0) // amount currently available to withdraw
+  totalEarnings Float   @default(0) // lifetime earnings (informational)
 
   company             Company?             @relation(fields: [companyId], references: [id])
   verificationTokens  VerificationToken[]
   passwordResetTokens PasswordResetToken[]
   refreshTokens       RefreshToken[]
+  issues              ReportedIssue[]
+  paymentMethods      PaymentMethod[]
+  notificationSetting NotificationSetting?
+  teamInvitesSent     TeamInvite[]
+  teamMemberships     TeamMember[]
 
   createdShipments      Shipment[]              @relation("ShipmentCreator")
   customerShipments     Shipment[]              @relation("CustomerShipments")
@@ -91,23 +190,43 @@ model User {
   ShipmentStatusHistory ShipmentStatusHistory[]
   Notification          Notification[]
   inventory             Inventory[]
+  bids                  TransporterBid[]        @relation("TransporterBids")
+  ratingsReceived       TransporterRating[]     @relation("RatingsReceived")
+  ratingsGiven          TransporterRating[]     @relation("RatingsGiven")
+  payments              Payment[]
+  communicationMessages CommunicationMessage[]
+  driverEarnings        DriverEarning[]         @relation("DriverEarnings")
+  withdrawals           Withdrawal[]
+
+  savedTransporters   SavedTransporter[] @relation("SavedTransporterOwner")
+  linkedAsTransporter SavedTransporter[] @relation("SavedTransporterLink")
 }
 
 model Company {
-  id              String   @id @default(cuid())
+  id              String       @id @default(cuid())
   fullName        String
   phoneNumber     String
-  emailAddress    String   @unique
+  emailAddress    String       @unique
   businessName    String
   businessAddress String
+  country         String?
+  language        String?
   role            CompanyRole?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  city            String?
+  openingHoursStart String?
+  openingHoursEnd   String?
+  vehicleType     String?
+  businessNumber  String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   documents         TrackingDocument[]
   users             User[]
+  teamMembers       TeamMember[]
   Warehouse         Warehouse[] // keep relation to warehouses
   InventoryLocation InventoryLocation[]
+  slaSettings       SlaSetting[]
+  pricingRules      PricingRule[]
 
   @@index([emailAddress])
 }
@@ -152,6 +271,149 @@ model RefreshToken {
   expiresAt DateTime
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SlaSetting {
+  id                          String   @id @default(cuid())
+  companyId                   String
+  companyName                 String
+  deliveryTimeCommitment      String
+  routeFrom                   String
+  routeTo                     String
+  vehicleType                 String
+  onTimeDeliveryTargetValue   Float
+  onTimeDeliveryThresholdType String
+  statePenalty                String
+  stateIncentive              String
+  validityStartDate           DateTime
+  validityEndDate             DateTime
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// PRICING MANAGEMENT (enterprise: set a $/tonnage rate per lane)
+// ─────────────────────────────────────────────────────────────────────────
+// A PricingRule is one lane config (origin -> destination, vehicle type,
+// currency, service level) for a company. Each rule has one or more tonnage
+// bands (PricingTier) whose `price` is the cost for shipping `toTons` tons on
+// that lane; the shipping fee for an actual shipment is the matching band's
+// per-ton rate (price / toTons) multiplied by the shipment's tons.
+model PricingRule {
+  id           String  @id @default(cuid())
+  companyId    String
+  origin       String // e.g. state/region/country of pickup
+  destination  String // e.g. state/region/country of delivery
+  vehicleType  String // e.g. Tipper, Flatbed, Truck
+  currency     String  @default("NGN")
+  serviceLevel String // e.g. Regular, Express
+  isActive     Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  tiers   PricingTier[]
+
+  @@index([companyId])
+  @@index([origin, destination, vehicleType, serviceLevel])
+}
+
+model PricingTier {
+  id            String @id @default(cuid())
+  pricingRuleId String
+  fromTons      Float
+  toTons        Float
+  price         Float
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pricingRule PricingRule @relation(fields: [pricingRuleId], references: [id], onDelete: Cascade)
+
+  @@index([pricingRuleId])
+}
+
+model ReportedIssue {
+  id        String   @id @default(cuid())
+  userId    String
+  text      String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PaymentMethod {
+  id                 String            @id @default(cuid())
+  userId             String
+  type               PaymentMethodType
+  cardholderName     String?
+  cardBrand          CardBrand?
+  cardLast4          String?
+  expiration         String?
+  postalCode         String?
+  bankName           String?
+  accountName        String?
+  accountNumberLast4 String?
+  bankSortCode       String?
+  currency           String?
+  isDefault          Boolean           @default(false) // default withdrawal account for LAST_MILE_DELIVERY drivers
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  withdrawals Withdrawal[]
+
+  @@index([userId])
+}
+
+model NotificationSetting {
+  id                     String   @id @default(cuid())
+  userId                 String   @unique
+  realTimeShipmentStatus Boolean  @default(true)
+  messaging              Boolean  @default(true)
+  escalationsOrDispute   Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model TeamInvite {
+  id          String   @id @default(cuid())
+  invitedById String
+  companyId   String?
+  email       String
+  status      String   @default("PENDING")
+  createdAt   DateTime @default(now())
+
+  invitedBy User @relation(fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@index([invitedById])
+  @@index([companyId])
+}
+
+model TeamMember {
+  id        String         @id @default(cuid())
+  companyId String
+  userId    String?
+  email     String
+  role      TeamMemberRole @default(VIEWER)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([companyId, email])
+  @@index([companyId])
+  @@index([userId])
 }
 
 model Warehouse {
@@ -273,7 +535,7 @@ model Inventory {
   updatedAt       DateTime @updatedAt
 
   // Relations
- // shipment        Shipment    @relation(fields: [shipmentId], references: [orderId])
+  // shipment        Shipment    @relation(fields: [shipmentId], references: [orderId])
   warehouse Warehouse           @relation(fields: [warehouseId], references: [id])
   locations InventoryLocation[]
   User      User?               @relation(fields: [userId], references: [id])
@@ -329,6 +591,11 @@ model Shipment {
   id      String @id @default(uuid())
   orderId String @unique // e.g. SHP-2025-00001
 
+  // SHIPMENT TYPE & VISIBILITY
+  shipmentType ShipmentType @default(INLAND)
+  visibility   Visibility   @default(PUBLIC)
+  freightType  FreightType? // cross-border only
+
   // CLIENT DETAILS
   clientName String
   email      String?
@@ -336,27 +603,49 @@ model Shipment {
 
   // CARGO DETAILS
   cargoType            String
-  tons                 Float
-  weight               Float
+  tons                 Float   @default(0)
+  weight               Float   @default(0)
   handlingInstructions String?
   specialHandling      String?
   itemCompactibility   String?
+  shippingCost         Float   @default(0)
+  tonnage              String?
+
+  // INLAND-SPECIFIC
+  truckType String? // e.g. Tipper, Flatbed
+  truckSize String? // e.g. 20 Tons
+
+  // CROSS-BORDER SPECIFIC
+  destinationCountry String?
+  customDocumentUrls String[] @default([])
+  cargoDuty          Float?
+
+  // ITEM & CUSTOMER DETAILS
+  nameOfItem     String?
+  customerName   String?
+  customerPhone  String?
+  additionalNote String?
 
   // ORIGIN & DESTINATION (JSON format)
   origin      Json // {country, region, state, lga, address}
   destination Json
 
   // PICKUP & DELIVERY
-  pickupMode   String
-  pickupDate   DateTime?
-  deliveryDate DateTime?
+  pickupMode          String
+  pickupDate          DateTime?
+  pickupTimeslot      String?
+  bookingOfficerPhone String?
+  waybillUrl          String?
+  deliveryDate        DateTime?
+  orderNumber         String?
 
   // SERVICE & PRICING
-  serviceType  String
-  baseFrieght  Float
-  handlingFee  Float
-  insuranceFee Float?
-  totalCost    Float
+  serviceType    String
+  baseFrieght    Float  @default(0)
+  handlingFee    Float  @default(0)
+  insuranceFee   Float?
+  transactionFee Float  @default(0)
+  totalCost      Float  @default(0)
 
   // STATUS & ASSIGNMENT
   status                ShipmentStatus @default(PENDING)
@@ -365,6 +654,25 @@ model Shipment {
   assignedZoneId        String?
   assignedRackId        String?
   assignedBinId         String?
+
+  // COORDINATES
+  pickupLat   Float?
+  pickupLng   Float?
+  deliveryLat Float?
+  deliveryLng Float?
+  currentLat  Float?
+  currentLng  Float?
+
+  // DELIVERY COMPLETION (last-mile driver flow: photo -> confirm code -> signature)
+  deliveryCode    String? // 4-digit code shared with the customer, confirmed by the driver on drop-off
+  proofPhotoUrl   String? // "Take Photo" step
+  codeConfirmedAt DateTime? // set once the driver enters the matching deliveryCode
+  signatureUrl    String? // customer signature captured on the final step
+  deliveredAt     DateTime? // actual completion timestamp (deliveryDate above is the ETA)
+
+  // DELIVERY FAILURE (driver "Cancel Delivery" action, e.g. rider denied entry)
+  failureReason String?
+  failedAt      DateTime?
 
   // TRACKING
   createdBy  String
@@ -378,21 +686,24 @@ model Shipment {
   customer    User       @relation("CustomerShipments", fields: [customerId], references: [id])
   transporter User?      @relation("TransporterShipments", fields: [assignedTransporterId], references: [id])
   warehouse   Warehouse? @relation("WarehouseShipments", fields: [assignedWarehouseId], references: [id])
+  zone        Zone?      @relation(fields: [assignedZoneId], references: [id])
+  rack        Rack?      @relation(fields: [assignedRackId], references: [id])
+  bin         Bin?       @relation(fields: [assignedBinId], references: [id])
 
-  // Optional relations (you can uncomment if you have Zone, Rack, Bin models)
-  zone Zone? @relation(fields: [assignedZoneId], references: [id])
-  rack Rack? @relation(fields: [assignedRackId], references: [id])
-  bin  Bin?  @relation(fields: [assignedBinId], references: [id])
-
-  //inventory     Inventory[]
-  documents     ShipmentDocument[]
-  statusHistory ShipmentStatusHistory[]
-  events        TrackingEvent[]
+  documents           ShipmentDocument[]
+  statusHistory       ShipmentStatusHistory[]
+  events              TrackingEvent[]
+  bids                TransporterBid[]
+  payment             Payment?
+  communicationThread CommunicationThread?
+  driverEarning       DriverEarning?
 
   @@index([orderId])
   @@index([status])
   @@index([customerId])
   @@index([createdBy])
+  @@index([shipmentType])
+  @@index([visibility])
   @@index([assignedWarehouseId])
   @@index([assignedZoneId])
   @@index([assignedRackId])
@@ -440,6 +751,60 @@ model TrackingEvent {
   @@index([shipmentId])
 }
 
+model CommunicationThread {
+  id                String                    @id @default(cuid())
+  shipmentId        String                    @unique
+  enterpriseUserId  String
+  transporterUserId String
+  status            CommunicationThreadStatus @default(ACTIVE)
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  shipment Shipment               @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  messages CommunicationMessage[]
+  calls    CallSession[]
+
+  @@index([enterpriseUserId])
+  @@index([transporterUserId])
+}
+
+model CommunicationMessage {
+  id        String    @id @default(cuid())
+  threadId  String
+  senderId  String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  thread CommunicationThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sender User                @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([threadId])
+  @@index([senderId])
+}
+
+model CallSession {
+  id             String            @id @default(cuid())
+  threadId       String
+  shipmentId     String
+  initiatedById  String
+  recipientId    String
+  status         CallSessionStatus @default(REQUESTED)
+  provider       String            @default("IN_APP")
+  providerCallId String?
+  startedAt      DateTime?
+  endedAt        DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  thread CommunicationThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId])
+  @@index([shipmentId])
+  @@index([initiatedById])
+  @@index([recipientId])
+}
+
 model Notification {
   id        String           @id @default(cuid())
   userId    String
@@ -460,4 +825,130 @@ model MarketplaceWaitlist {
   country   String
   industry  String
   createdAt DateTime @default(now())
+}
+
+model TransporterBid {
+  id            String    @id @default(cuid())
+  shipmentId    String
+  transporterId String
+  price         Float
+  status        BidStatus @default(PENDING)
+  note          String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  shipment    Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  transporter User     @relation("TransporterBids", fields: [transporterId], references: [id])
+
+  @@unique([shipmentId, transporterId])
+  @@index([shipmentId])
+  @@index([transporterId])
+  @@index([status])
+}
+
+model TransporterRating {
+  id            String   @id @default(cuid())
+  transporterId String
+  ratedById     String
+  shipmentId    String?
+  rating        Int // 1–5
+  comment       String?
+  createdAt     DateTime @default(now())
+
+  transporter User @relation("RatingsReceived", fields: [transporterId], references: [id])
+  ratedBy     User @relation("RatingsGiven", fields: [ratedById], references: [id])
+
+  @@index([transporterId])
+  @@index([ratedById])
+  @@index([shipmentId])
+}
+
+model Payment {
+  id         String    @id @default(cuid())
+  shipmentId String    @unique
+  userId     String
+  amount     Float
+  currency   String    @default("NGN")
+  provider   String    @default("PAYSTACK")
+  reference  String    @unique
+  status     String    @default("PENDING")
+  metadata   Json?
+  paidAt     DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([reference])
+  @@index([status])
+}
+
+/**
+ * --- LAST_MILE_DELIVERY driver wallet ---
+ */
+model DriverEarning {
+  id         String              @id @default(cuid())
+  driverId   String
+  shipmentId String              @unique
+  amount     Float
+  status     DriverEarningStatus @default(AVAILABLE)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  driver   User     @relation("DriverEarnings", fields: [driverId], references: [id], onDelete: Cascade)
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([driverId])
+  @@index([status])
+}
+
+model Withdrawal {
+  id            String           @id @default(cuid())
+  userId        String
+  amount        Float
+  fee           Float            @default(0)
+  netAmount     Float
+  bankAccountId String?
+  bankName      String?
+  accountName   String?
+  accountNumberLast4 String?
+  status        WithdrawalStatus @default(PENDING)
+  reference     String           @unique
+  failureReason String?
+  createdAt     DateTime         @default(now())
+  processedAt   DateTime?
+
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankAccount PaymentMethod? @relation(fields: [bankAccountId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}
+
+/**
+ * --- Enterprise "Add transporter" / "Saved transporter" address book ---
+ * An enterprise (or any shipment-creating account) can save transporters they
+ * work with. Saving sends an invite (name + phone + email). If a matching
+ * transporter account already exists it is linked immediately.
+ */
+model SavedTransporter {
+  id            String                  @id @default(cuid())
+  ownerId       String // the enterprise/LSP user who added this transporter
+  name          String
+  countryCode   String                  @default("+1")
+  phone         String
+  email         String
+  transporterId String? // linked User once matched with a real transporter account
+  status        SavedTransporterStatus  @default(INVITED)
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  owner       User  @relation("SavedTransporterOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  transporter User? @relation("SavedTransporterLink", fields: [transporterId], references: [id])
+
+  @@unique([ownerId, email])
+  @@index([ownerId])
+  @@index([transporterId])
 }

@@ -1,0 +1,535 @@
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import { CreateSlaDto } from './dto/create-sla.dto';
+import {
+   InviteTeamMemberDto,
+   LanguageSettingDto,
+   NotificationSettingsDto,
+   PaymentMethodDto,
+   PaymentMethodInputType,
+   ReportIssueDto,
+   TeamInviteStatusDto,
+   TeamMemberRoleDto,
+   UpdateEndUserProfileDto,
+   UpdateEnterpriseProfileDto,
+   UpdateTeamMemberRoleDto,
+   UpdateTeamInviteDto,
+} from './dto/settings.dto';
+
+@Injectable()
+export class SettingsService {
+   constructor(private readonly prisma: PrismaService) {}
+
+   private async getUser(userId: string) {
+      const user = await this.prisma.user.findUnique({ where: { id: userId }, include: { company: true } });
+      if (!user) throw new NotFoundException('User not found');
+      return user;
+   }
+
+   private last4(value?: string) {
+      return value ? value.slice(-4) : undefined;
+   }
+
+   private cleanEmail(email?: string) {
+      return email?.trim();
+   }
+
+   private async ensureEmailAvailable(email: string | undefined, currentUserId: string) {
+      if (!email) return;
+
+      const existingUser = await this.prisma.user.findFirst({
+         where: {
+            email: { equals: email, mode: 'insensitive' },
+            NOT: { id: currentUserId },
+         },
+      });
+
+      if (existingUser) throw new BadRequestException('Email is already registered');
+   }
+
+   private async ensureEnterpriseTeamManager(userId: string) {
+      const user = await this.getUser(userId);
+      if (user.kind !== 'ENTERPRISE') throw new ForbiddenException('Team management is only available to enterprise users');
+      if (!user.companyId) throw new BadRequestException('Enterprise company profile is required');
+      return user;
+   }
+
+   async createEnterpriseSla(userId: string, dto: CreateSlaDto) {
+      const user = await this.getUser(userId);
+      if (user.kind !== 'ENTERPRISE') {
+         throw new ForbiddenException('SLA settings are only available to enterprise users');
+      }
+      if (!user.companyId) throw new BadRequestException('Enterprise company profile is required');
+
+      return this.prisma.slaSetting.create({
+         data: {
+            companyId: user.companyId,
+            companyName: dto.companyName,
+            deliveryTimeCommitment: dto.deliveryTimeCommitment,
+            routeFrom: dto.route.from,
+            routeTo: dto.route.to,
+            vehicleType: dto.vehicleType,
+            onTimeDeliveryTargetValue: dto.onTimeDeliveryRate.targetValue,
+            onTimeDeliveryThresholdType: dto.onTimeDeliveryRate.thresholdType,
+            statePenalty: dto.statePenalty,
+            stateIncentive: dto.stateIncentive,
+            validityStartDate: new Date(dto.validityPeriod.startDate),
+            validityEndDate: new Date(dto.validityPeriod.endDate),
+         },
+      });
+   }
+
+   async listEnterpriseSlas(userId: string) {
+      const user = await this.getUser(userId);
+      if (user.kind !== 'ENTERPRISE') throw new ForbiddenException('SLA settings are only available to enterprise users');
+      if (!user.companyId) return [];
+      return this.prisma.slaSetting.findMany({ where: { companyId: user.companyId }, orderBy: { createdAt: 'desc' } });
+   }
+
+   async reportIssue(userId: string, dto: ReportIssueDto) {
+      return this.prisma.reportedIssue.create({
+         data: {
+            userId,
+            text: dto.text,
+         },
+      });
+   }
+
+   async addPaymentMethod(userId: string, dto: PaymentMethodDto) {
+      if (dto.type === PaymentMethodInputType.CARD) {
+         if (!dto.cardNumber || !dto.cardBrand || !dto.cardholderName || !dto.expiration || !dto.cvv || !dto.postalCode) {
+            throw new BadRequestException('Card payment method requires cardholderName, cardBrand, cardNumber, expiration, cvv, and postalCode');
+         }
+
+         return this.prisma.paymentMethod.create({
+            data: {
+               userId,
+               type: 'CARD',
+               cardholderName: dto.cardholderName,
+               cardBrand: dto.cardBrand,
+               cardLast4: this.last4(dto.cardNumber),
+               expiration: dto.expiration,
+               postalCode: dto.postalCode,
+            },
+         });
+      }
+
+      if (!dto.bankName || !dto.accountName || !dto.accountNumber || !dto.bankSortCode || !dto.currency) {
+         throw new BadRequestException('Local bank payment method requires bankName, accountName, accountNumber, bankSortCode, and currency');
+      }
+
+      return this.prisma.paymentMethod.create({
+         data: {
+            userId,
+            type: 'LOCAL_BANK',
+            bankName: dto.bankName,
+            accountName: dto.accountName,
+            accountNumberLast4: this.last4(dto.accountNumber),
+            bankSortCode: dto.bankSortCode,
+            currency: dto.currency,
+         },
+      });
+   }
+
+   async listPaymentMethods(userId: string) {
+      return this.prisma.paymentMethod.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
+   }
+
+   async updatePaymentMethod(userId: string, id: string, dto: PaymentMethodDto) {
+      const existing = await this.prisma.paymentMethod.findFirst({ where: { id, userId } });
+      if (!existing) throw new NotFoundException('Payment method not found');
+
+      const data =
+         dto.type === PaymentMethodInputType.CARD
+            ? {
+                 type: 'CARD' as const,
+                 cardholderName: dto.cardholderName,
+                 cardBrand: dto.cardBrand,
+                 cardLast4: this.last4(dto.cardNumber),
+                 expiration: dto.expiration,
+                 postalCode: dto.postalCode,
+                 bankName: null,
+                 accountName: null,
+                 accountNumberLast4: null,
+                 bankSortCode: null,
+                 currency: null,
+              }
+            : {
+                 type: 'LOCAL_BANK' as const,
+                 bankName: dto.bankName,
+                 accountName: dto.accountName,
+                 accountNumberLast4: this.last4(dto.accountNumber),
+                 bankSortCode: dto.bankSortCode,
+                 currency: dto.currency,
+                 cardholderName: null,
+                 cardBrand: null,
+                 cardLast4: null,
+                 expiration: null,
+                 postalCode: null,
+              };
+
+      return this.prisma.paymentMethod.update({ where: { id }, data });
+   }
+
+   async removePaymentMethod(userId: string, id: string) {
+      const existing = await this.prisma.paymentMethod.findFirst({ where: { id, userId } });
+      if (!existing) throw new NotFoundException('Payment method not found');
+      await this.prisma.paymentMethod.delete({ where: { id } });
+      return { ok: true };
+   }
+
+   async updateLanguage(userId: string, dto: LanguageSettingDto) {
+      const user = await this.getUser(userId);
+      if (!user.companyId) throw new BadRequestException('Company profile is required');
+      return this.prisma.company.update({
+         where: { id: user.companyId },
+         data: { language: dto.language },
+      });
+   }
+
+   async updateNotifications(userId: string, dto: NotificationSettingsDto) {
+      return this.prisma.notificationSetting.upsert({
+         where: { userId },
+         create: {
+            userId,
+            realTimeShipmentStatus: dto.realTimeShipmentStatus,
+            messaging: dto.messaging,
+            escalationsOrDispute: dto.escalationsOrDispute,
+         },
+         update: {
+            realTimeShipmentStatus: dto.realTimeShipmentStatus,
+            messaging: dto.messaging,
+            escalationsOrDispute: dto.escalationsOrDispute,
+         },
+      });
+   }
+
+   async getNotifications(userId: string) {
+      return this.prisma.notificationSetting.upsert({
+         where: { userId },
+         create: { userId },
+         update: {},
+      });
+   }
+
+   async inviteTeamMember(userId: string, dto: InviteTeamMemberDto) {
+      const user = await this.ensureEnterpriseTeamManager(userId);
+      const email = dto.email.trim();
+      const role = dto.role ?? TeamMemberRoleDto.VIEWER;
+
+      return this.prisma.$transaction(async (tx) => {
+         const invite = await tx.teamInvite.create({
+            data: {
+               invitedById: userId,
+               companyId: user.companyId,
+               email,
+            },
+         });
+
+         const acceptedUser = await tx.user.findFirst({
+            where: {
+               email: { equals: email, mode: 'insensitive' },
+               isVerified: true,
+            },
+            select: { id: true },
+         });
+
+         const member = await tx.teamMember.upsert({
+            where: {
+               companyId_email: {
+                  companyId: user.companyId!,
+                  email,
+               },
+            },
+            create: {
+               companyId: user.companyId!,
+               email,
+               role,
+               userId: acceptedUser?.id,
+            },
+            update: {
+               role,
+               userId: acceptedUser?.id,
+            },
+         });
+
+         return { invite, member };
+      });
+   }
+
+   private async withAcceptedUser(invite: { email: string }) {
+      return this.prisma.user.findFirst({
+         where: {
+            email: { equals: invite.email, mode: 'insensitive' },
+            isVerified: true,
+         },
+         select: {
+            id: true,
+            email: true,
+            phone: true,
+            kind: true,
+            company: { select: { fullName: true, businessName: true, emailAddress: true } },
+            createdAt: true,
+         },
+      });
+   }
+
+   async listTeamInvites(userId: string, status?: TeamInviteStatusDto | string) {
+      const user = await this.ensureEnterpriseTeamManager(userId);
+      await this.syncTeamMembersFromInvites(user.companyId!);
+      const invites = await this.prisma.teamInvite.findMany({
+         where: {
+            companyId: user.companyId,
+            ...(status ? { status } : {}),
+         },
+         orderBy: { createdAt: 'desc' },
+      });
+
+      const enriched = await Promise.all(
+         invites.map(async (invite) => {
+            const acceptedUser = await this.withAcceptedUser(invite);
+            return {
+               ...invite,
+               hasAcceptedAccount: Boolean(acceptedUser),
+               acceptedUser,
+            };
+         }),
+      );
+
+      return enriched;
+   }
+
+   async updateTeamInvite(userId: string, id: string, dto: UpdateTeamInviteDto) {
+      const user = await this.ensureEnterpriseTeamManager(userId);
+      const invite = await this.prisma.teamInvite.findFirst({
+         where: {
+            id,
+            companyId: user.companyId,
+         },
+      });
+
+      if (!invite) throw new NotFoundException('Team invite not found');
+
+      return this.prisma.$transaction(async (tx) => {
+         const updatedInvite = await tx.teamInvite.update({
+            where: { id },
+            data: { status: dto.status },
+         });
+
+         const acceptedUser = await tx.user.findFirst({
+            where: {
+               email: { equals: invite.email, mode: 'insensitive' },
+               isVerified: true,
+            },
+            select: { id: true },
+         });
+
+         if (dto.status === TeamInviteStatusDto.ACCEPTED) {
+            await tx.teamMember.upsert({
+               where: {
+                  companyId_email: {
+                     companyId: user.companyId!,
+                     email: invite.email,
+                  },
+               },
+               create: {
+                  companyId: user.companyId!,
+                  email: invite.email,
+                  userId: acceptedUser?.id,
+                  role: TeamMemberRoleDto.VIEWER,
+               },
+               update: {
+                  userId: acceptedUser?.id,
+               },
+            });
+         }
+
+         if (dto.status === TeamInviteStatusDto.CANCELLED || dto.status === TeamInviteStatusDto.DECLINED) {
+            await tx.teamMember.deleteMany({
+               where: {
+                  companyId: user.companyId!,
+                  email: invite.email,
+               },
+            });
+         }
+
+         return updatedInvite;
+      });
+   }
+
+   private async syncTeamMembersFromInvites(companyId: string) {
+      const invites = await this.prisma.teamInvite.findMany({ where: { companyId } });
+      await Promise.all(
+         invites.map(async (invite) => {
+            if (invite.status === TeamInviteStatusDto.CANCELLED || invite.status === TeamInviteStatusDto.DECLINED) return;
+            const acceptedUser = await this.withAcceptedUser(invite);
+            await this.prisma.teamMember.upsert({
+               where: {
+                  companyId_email: {
+                     companyId,
+                     email: invite.email,
+                  },
+               },
+               create: {
+                  companyId,
+                  email: invite.email,
+                  role: TeamMemberRoleDto.VIEWER,
+                  userId: acceptedUser?.id,
+               },
+               update: {
+                  userId: acceptedUser?.id,
+               },
+            });
+         }),
+      );
+   }
+
+   async listTeamMembers(userId: string) {
+      const user = await this.ensureEnterpriseTeamManager(userId);
+      const companyId = user.companyId!;
+      await this.syncTeamMembersFromInvites(companyId);
+
+      const members = await this.prisma.teamMember.findMany({
+         where: { companyId },
+         orderBy: { createdAt: 'desc' },
+         include: {
+            user: {
+               select: {
+                  id: true,
+                  email: true,
+                  phone: true,
+                  kind: true,
+                  isVerified: true,
+                  company: { select: { fullName: true, businessName: true, emailAddress: true } },
+               },
+            },
+         },
+      });
+
+      const invites = await this.prisma.teamInvite.findMany({
+         where: { companyId },
+         orderBy: { createdAt: 'desc' },
+      });
+
+      return members.map((member: any) => {
+         const invite = invites.find((item) => item.email.toLowerCase() === member.email.toLowerCase());
+         return {
+            ...member,
+            inviteStatus: invite?.status ?? (member.user?.isVerified ? TeamInviteStatusDto.ACCEPTED : TeamInviteStatusDto.PENDING),
+            invite,
+         };
+      });
+   }
+
+   async updateTeamMemberRole(userId: string, id: string, dto: UpdateTeamMemberRoleDto) {
+      const user = await this.ensureEnterpriseTeamManager(userId);
+      const companyId = user.companyId!;
+      const member = await this.prisma.teamMember.findFirst({
+         where: {
+            id,
+            companyId,
+         },
+      });
+
+      if (!member) throw new NotFoundException('Team member not found');
+
+      return this.prisma.teamMember.update({
+         where: { id },
+         data: { role: dto.role },
+      });
+   }
+
+   async removeTeamMember(userId: string, id: string) {
+      const user = await this.ensureEnterpriseTeamManager(userId);
+      const companyId = user.companyId!;
+      const member = await this.prisma.teamMember.findFirst({
+         where: {
+            id,
+            companyId,
+         },
+      });
+
+      if (!member) throw new NotFoundException('Team member not found');
+
+      await this.prisma.$transaction([
+         this.prisma.teamMember.delete({ where: { id: member.id } }),
+         this.prisma.teamInvite.updateMany({
+            where: {
+               companyId,
+               email: member.email,
+            },
+            data: { status: TeamInviteStatusDto.CANCELLED },
+         }),
+      ]);
+
+      return { ok: true, message: 'Team member removed' };
+   }
+
+   async updateEnterpriseProfile(userId: string, dto: UpdateEnterpriseProfileDto) {
+      const user = await this.getUser(userId);
+      if (user.kind !== 'ENTERPRISE') throw new ForbiddenException('Enterprise profile update is only available to enterprise users');
+      if (!user.companyId) throw new BadRequestException('Company profile is required');
+      const email = this.cleanEmail(dto.email);
+      await this.ensureEmailAvailable(email, userId);
+
+      return this.prisma.$transaction(async (tx) => {
+         const company = await tx.company.update({
+            where: { id: user.companyId! },
+            data: {
+               businessName: dto.enterpriseName,
+               fullName: dto.enterpriseName,
+               businessAddress: dto.physicalAddress,
+               emailAddress: email,
+               phoneNumber: dto.phoneNumber,
+            },
+         });
+         const updatedUser = await tx.user.update({
+            where: { id: userId },
+            data: {
+               email,
+               phone: dto.phoneNumber,
+            },
+         });
+         return { company, user: updatedUser };
+      });
+   }
+
+   async updateEndUserProfile(userId: string, dto: UpdateEndUserProfileDto) {
+      const user = await this.getUser(userId);
+      if (user.kind !== 'INDIVIDUAL') throw new ForbiddenException('End user profile update is only available to individual users');
+      if (!user.companyId) throw new BadRequestException('Profile is required');
+      const email = this.cleanEmail(dto.email);
+      await this.ensureEmailAvailable(email, userId);
+
+      return this.prisma.$transaction(async (tx) => {
+         const company = await tx.company.update({
+            where: { id: user.companyId! },
+            data: {
+               fullName: dto.userName,
+               businessName: dto.userName,
+               businessAddress: dto.physicalAddress,
+               emailAddress: email,
+               phoneNumber: dto.phoneNumber,
+            },
+         });
+         const updatedUser = await tx.user.update({
+            where: { id: userId },
+            data: {
+               email,
+               phone: dto.phoneNumber,
+            },
+         });
+         return { company, user: updatedUser };
+      });
+   }
+
+   async deactivateAccount(userId: string) {
+      await this.prisma.$transaction([this.prisma.refreshToken.deleteMany({ where: { userId } }), this.prisma.user.update({ where: { id: userId }, data: { deactivatedAt: new Date() } })]);
+      return { ok: true, message: 'Account deactivated' };
+   }
+
+   async logout(userId: string) {
+      await this.prisma.refreshToken.deleteMany({ where: { userId } });
+      return { ok: true, message: 'Logged out' };
+   }
+}

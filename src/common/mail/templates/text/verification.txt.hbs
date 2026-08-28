@@ -1,8 +1,18 @@
 Hi {{fullName}},
 
-Welcome to {{appName}}. Please verify your email to complete registration:
+Welcome to {{appName}}.
+
+{{#if verificationCode}}
+Enter this 4 digit code in the app to complete your enterprise registration:
+
+{{verificationCode}}
+
+This code expires in 15 minutes.
+{{else}}
+Please verify your email to complete registration:
 
 {{verificationUrl}}
+{{/if}}
 
 If you didn't sign up, ignore this email.
 
